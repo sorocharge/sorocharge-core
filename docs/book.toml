@@ -1,0 +1,15 @@
+[book]
+title = "sorocharge-core"
+description = "A Rust workspace for building, signing, and verifying Soroban authorization entries that pay for things — one signing engine, two HTTP payment protocols on top of it: x402 and MPP."
+authors = ["Stellar Development Foundation"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/sorocharge/sorocharge-core"
+edit-url-template = "https://github.com/sorocharge/sorocharge-core/edit/main/docs/{path}"
+default-theme = "light"
+preferred-dark-theme = "navy"
+
+[output.html.search]
+limit-results = 20
