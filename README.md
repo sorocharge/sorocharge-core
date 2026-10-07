@@ -5,6 +5,9 @@ entries that pay for things — one signing engine, two HTTP payment
 protocols on top of it: **[x402](https://github.com/x402-foundation/x402)**
 and **[MPP](https://paymentauth.org/)**'s `draft-stellar-charge-00`.
 
+📖 **[Full documentation](https://sorocharge.github.io/sorocharge-core/)** — architecture,
+protocol mechanics, integration guides, and the complete API reference.
+
 ```
 sorocharge-signer   the shared engine: build/sign/verify a SEP-41 transfer
                      authorization entry, for every CAP-71 credential shape
