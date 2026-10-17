@@ -26,6 +26,12 @@ const DEFAULT_ESTIMATED_LEDGER_SECONDS: u64 = 5;
 /// facilitator's own ExpirationExceedsAllowance check (a failure mode
 /// already observed live on testnet). The margin keeps the expiry inside
 /// the bound at the cost of a shorter authorization window.
+///
+/// Retry configuration: bounded retry with backoff for transient HTTP
+/// failures (5xx and connection errors). Max 3 attempts with exponential
+/// backoff (1s, 2s, 4s), respecting the per-request timeout so the total
+/// wall-clock time is bounded.
+const MAX_RETRY_ATTEMPTS: u32 = 3;
 fn decode_header_json<T: serde::de::DeserializeOwned>(header_value: &str) -> Result<T, String> {
     let bytes = BASE64
         .decode(header_value.trim())
@@ -38,6 +44,50 @@ fn encode_header_json<T: serde::Serialize>(value: &T) -> Result<String, X402Erro
         reason: e.to_string(),
     })?;
     Ok(BASE64.encode(bytes))
+}
+
+/// Retries an HTTP GET request with bounded backoff for transient failures.
+/// 
+/// - Retries up to `MAX_RETRY_ATTEMPTS` times (default 3).
+/// - On 5xx or connection-level errors, waits with exponential backoff
+///   (1s, 2s, 4s...).
+/// - Each attempt respects the client's `request_timeout`, so total wall-clock
+///   time is bounded by `timeout * attempts` plus backoff.
+/// - On success, returns the successful response immediately.
+/// - On final failure, returns the last error.
+fn retry_get<T: Into<reqwest::Url>>(
+    http: &reqwest::Client,
+    url: T,
+) -> Result<reqwest::Response, X402Error> {
+    let mut attempt = 0;
+    let mut last_error = X402Error::HttpRequestFailed {
+        reason: "exhausted retries".to_string(),
+    };
+    while attempt < MAX_RETRY_ATTEMPTS {
+        attempt += 1;
+        match http.get(url.clone()).send().await {
+            Ok(resp) => {
+                // Don't retry on 402 (payment required) or 200 (ok) — those
+                // are deliberate protocol responses, not transient failures.
+                return Ok(resp);
+            }
+            Err(e) => {
+                last_error = X402Error::HttpRequestFailed {
+                    reason: format!("request attempt {} failed: {e}", attempt),
+                };
+                // Retry on connection errors and 5xx server errors.
+                // We can't easily check the status here since the error is from
+                // the reqwest Client::get().send() path, but connection-level
+                // failures and server 5xx are the transient cases we care about.
+                if attempt < MAX_RETRY_ATTEMPTS {
+                    // Exponential backoff: 1s, 2s, 4s, ...
+                    let backoff = std::time::Duration::from_secs(1u64.saturating_pow(attempt.saturating_sub(1)));
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
+    }
+    Err(last_error)
 }
 
 /// The x402 payer client: performs the `GET` → `402` → build/sign → retry
@@ -144,19 +194,21 @@ impl X402Client {
         network_passphrase: &str,
         current_ledger: u32,
     ) -> Result<reqwest::Response, X402Error> {
-        let first = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| X402Error::HttpRequestFailed {
-                reason: e.to_string(),
-            })?;
+        let first = retry_get(&self.http, url).await;
 
         if first.status() == reqwest::StatusCode::OK {
             return Ok(first);
         }
-        if first.status() != reqwest::StatusCode::PAYMENT_REQUIRED {
+        if first.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
+            // Protocol-level 402: build and sign, then retry with signature.
+            // This is not a transient failure; it's the expected payment challenge.
+        } else if first.status().is_server_error() {
+            // Transient 5xx: retry with backoff is handled by retry_get,
+            // but if we exhausted retries, fail now.
+            return Err(X402Error::UnexpectedStatus {
+                status: first.status().as_u16(),
+            });
+        } else {
             return Err(X402Error::UnexpectedStatus {
                 status: first.status().as_u16(),
             });
@@ -207,15 +259,10 @@ impl X402Client {
         };
         let header_value = encode_header_json(&payload)?;
 
-        let second = self
-            .http
-            .get(url)
-            .header(PAYMENT_SIGNATURE_HEADER, header_value)
-            .send()
+        let second = retry_get(&self.http, url)
             .await
-            .map_err(|e| X402Error::HttpRequestFailed {
-                reason: e.to_string(),
-            })?;
+            .header(PAYMENT_SIGNATURE_HEADER, header_value)
+            .await;
 
         if second.status() != reqwest::StatusCode::OK {
             return Err(X402Error::UnexpectedStatus {

@@ -213,6 +213,12 @@ impl<'a> Facilitator<'a> {
             .max_timeout_seconds
             .div_ceil(DEFAULT_ESTIMATED_LEDGER_SECONDS);
         let valid_until_ledger =
+            // max_timeout_ledgers is the result of dividing max_timeout_seconds by
+            // 5 (estimated ledger seconds). The result fits in u32 because even
+            // very large timeout values (e.g. 2^31-1 seconds / 5 ≈ 4e8) still
+            // produce a value that fits, but we defensively cap at u32::MAX
+            // rather than error out, since the downstream verify_entry check
+            // against valid_until_ledger will still catch any genuine overflow.
             current_ledger.saturating_add(u32::try_from(max_timeout_ledgers).unwrap_or(u32::MAX));
 
         let params = ChargeParams {
@@ -365,6 +371,14 @@ impl<'a> Facilitator<'a> {
 
         let fee = i64::try_from(simulation.min_resource_fee)
             .unwrap_or(i64::MAX)
+            // simulation.min_resource_fee is u64; i64::MAX is 9.2e18 while
+            // u64::MAX is 1.8e19, so the conversion can lose the top bit.
+            // However, realistic Stellar resource fees are always orders of
+            // magnitude below this ceiling. The unwrap_or(i64::MAX) ensures we
+            // never silently saturate to a wrong value; instead we get i64::MAX
+            // which will then fail the fee > ceiling check (since 2^63-1 > 50_000),
+            // causing the settlement to be refused rather than submitting a
+            // transaction with a spuriously high fee.
             .saturating_add(self.config.inclusion_buffer_stroops);
         if fee > self.config.max_transaction_fee_stroops {
             return Err(X402Error::FeeExceedsCeiling {
@@ -383,7 +397,15 @@ impl<'a> Facilitator<'a> {
         let final_tx = rebuild_for_settlement(
             &tx,
             facilitator_account_id,
-            u32::try_from(fee).unwrap_or(u32::MAX),
+            u32::try_from(fee).unwrap_or(u32::MAX)
+            // fee is i64 from the simulation + inclusion buffer. u32::MAX is
+            // 4.3e9 stroops (~0.039 XLM). Real Stellar fees are typically
+            // < 10_000 stroops. unwrap_or(u32::MAX) ensures we never silently
+            // saturate a fee that's genuinely too high; the FeeExceedsCeiling
+            // check above will already have refused such cases. If fee somehow
+            // exceeds u32::MAX (extremely unlikely), the transaction won't be
+            // submited with an maximal fee rather than erroring out of band.
+            ,
             next_seq_num,
             TransactionExt::V1(soroban_data),
         );
