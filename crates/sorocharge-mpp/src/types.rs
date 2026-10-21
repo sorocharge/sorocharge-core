@@ -126,6 +126,40 @@ pub struct MethodDetails {
 ///
 /// `description` carries a per-field maximum length (see
 /// [`MAX_DESCRIPTION_LEN`]), enforced on deserialize.
+///
+/// # Examples
+///
+/// ```rust
+/// use sorocharge_mpp::{ChargeRequest, MethodDetails};
+///
+/// let request = ChargeRequest {
+///     amount: "10000000".to_string(),
+///     currency: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA".to_string(),
+///     recipient: "GBHEGW3KWOY2OFH767EDALFGCUTBOEVBDQMCKU4APMDLQNBW5QV3W3KO".to_string(),
+///     description: Some("API access fee".to_string()),
+///     external_id: Some("order-42".to_string()),
+///     method_details: MethodDetails {
+///         network: "stellar:testnet".to_string(),
+///         fee_payer: true,
+///     },
+/// };
+///
+/// // Fields serialize in the camelCase form the spec mandates, so the
+/// // encoded request can be placed in a challenge verbatim.
+/// let json = serde_json::to_value(&request).unwrap();
+/// assert_eq!(json["amount"], "10000000");
+/// assert_eq!(
+///     json["currency"],
+///     "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
+/// );
+/// assert_eq!(
+///     json["recipient"],
+///     "GBHEGW3KWOY2OFH767EDALFGCUTBOEVBDQMCKU4APMDLQNBW5QV3W3KO"
+/// );
+/// assert_eq!(json["externalId"], "order-42");
+/// assert_eq!(json["methodDetails"]["network"], "stellar:testnet");
+/// assert_eq!(json["methodDetails"]["feePayer"], true);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ChargeRequest {
@@ -155,6 +189,36 @@ pub struct ChargeRequest {
 ///
 /// `realm` and `description` carry per-field maximum lengths (see
 /// [`MAX_REALM_LEN`] and [`MAX_DESCRIPTION_LEN`]), enforced on deserialize.
+///
+/// # Examples
+///
+/// ```rust
+/// use sorocharge_mpp::Challenge;
+///
+/// let challenge = Challenge {
+///     id: "kM9xPqWvT2nJrHsY4aDfEb".to_string(),
+///     realm: "api.example.com".to_string(),
+///     method: "stellar".to_string(),
+///     intent: "charge".to_string(),
+///     // base64url of {"amount":"10000000"}
+///     request: "eyJhbW91bnQiOiIxMDAwMDAwMCJ9".to_string(),
+///     description: Some("API access".to_string()),
+///     opaque: None,
+///     digest: None,
+///     expires: Some("2025-02-05T12:05:00Z".to_string()),
+///     header: Some("Authorization".to_string()),
+/// };
+///
+/// // The base64url `request` survives a round-trip unchanged, which is what
+/// // lets the payer echo it back and bind a credential to this challenge.
+/// let encoded = serde_json::to_string(&challenge).unwrap();
+/// let decoded: Challenge = serde_json::from_str(&encoded).unwrap();
+/// assert_eq!(decoded, challenge);
+/// assert_eq!(decoded.request, "eyJhbW91bnQiOiIxMDAwMDAwMCJ9");
+/// assert_eq!(decoded.realm, "api.example.com");
+/// assert_eq!(decoded.method, "stellar");
+/// assert_eq!(decoded.intent, "charge");
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Challenge {
     pub id: String,
@@ -184,6 +248,36 @@ pub struct Challenge {
 }
 
 /// The Stellar-specific `payload` of a credential, keyed by `type`.
+///
+/// # Examples
+///
+/// ```rust
+/// use sorocharge_mpp::Payload;
+///
+/// // Pull mode: the server submits the signed transaction envelope.
+/// let pull = Payload::Transaction {
+///     transaction: "AAAAAgAAAABriIN4poutFUmHfB6FbFJu8GgXoPPTGQWREqFpPfvO1AAAAAAAAAAAAAAAAAAAAA..."
+///         .to_string(),
+/// };
+/// let json = serde_json::to_value(&pull).unwrap();
+/// assert_eq!(json["type"], "transaction");
+/// assert!(json["transaction"]
+///     .as_str()
+///     .unwrap()
+///     .starts_with("AAAAAgAAAABriIN4"));
+///
+/// // Push mode: the client already broadcast the transaction, so it sends
+/// // only the 64-character hex hash for the server to confirm.
+/// let push = Payload::Hash {
+///     hash: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd".to_string(),
+/// };
+/// let json = serde_json::to_value(&push).unwrap();
+/// assert_eq!(json["type"], "hash");
+/// assert_eq!(
+///     json["hash"],
+///     "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
+/// );
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Payload {
@@ -196,6 +290,43 @@ pub enum Payload {
 
 /// The full credential sent in the `Authorization` (or
 /// `Payment-Authorization`) header, base64url-encoded.
+///
+/// # Examples
+///
+/// ```rust
+/// use sorocharge_mpp::{Challenge, Credential, Payload};
+///
+/// let credential = Credential {
+///     challenge: Challenge {
+///         id: "kM9xPqWvT2nJrHsY4aDfEb".to_string(),
+///         realm: "api.example.com".to_string(),
+///         method: "stellar".to_string(),
+///         intent: "charge".to_string(),
+///         // base64url of {"amount":"10000000"}
+///         request: "eyJhbW91bnQiOiIxMDAwMDAwMCJ9".to_string(),
+///         description: None,
+///         opaque: None,
+///         digest: None,
+///         expires: Some("2025-02-05T12:05:00Z".to_string()),
+///         header: None,
+///     },
+///     payload: Payload::Hash {
+///         hash: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
+///             .to_string(),
+///     },
+///     source: Some(
+///         "did:pkh:stellar:testnet:GBHEGW3KWOY2OFH767EDALFGCUTBOEVBDQMCKU4APMDLQNBW5QV3W3KO"
+///             .to_string(),
+///     ),
+/// };
+///
+/// let encoded = serde_json::to_string(&credential).unwrap();
+/// let decoded: Credential = serde_json::from_str(&encoded).unwrap();
+/// assert_eq!(decoded, credential);
+/// assert_eq!(decoded.challenge.realm, "api.example.com");
+/// assert_eq!(decoded.challenge.request, credential.challenge.request);
+/// assert!(matches!(decoded.payload, Payload::Hash { .. }));
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Credential {
     pub challenge: Challenge,
