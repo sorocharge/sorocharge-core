@@ -342,6 +342,32 @@ pub struct PaymentPayload {
 /// The result of on-chain settlement, carried base64-encoded in the
 /// `PAYMENT-RESPONSE` header, and returned as the JSON body of a
 /// facilitator's `/settle`.
+///
+/// # Examples
+///
+/// Decode a successful settlement and inspect the on-chain identifiers the
+/// facilitator reported:
+///
+/// ```rust
+/// use sorocharge_x402::SettlementResponse;
+///
+/// let json = r#"{
+///   "success": true,
+///   "transaction": "3389e9f0f1a65f19736cacf544c2e825313e8447f569233bb8db39aa607c8889",
+///   "network": "stellar:testnet",
+///   "payer": "GBHEGW3KWOY2OFH767EDALFGCUTBOEVBDQMCKU4APMDLQNBW5QV3W3KO",
+///   "amount": "10000000"
+/// }"#;
+///
+/// let settlement: SettlementResponse = serde_json::from_str(json).unwrap();
+/// assert!(settlement.success);
+/// assert_eq!(settlement.network, "stellar:testnet");
+/// assert_eq!(
+///     settlement.payer.as_deref(),
+///     Some("GBHEGW3KWOY2OFH767EDALFGCUTBOEVBDQMCKU4APMDLQNBW5QV3W3KO")
+/// );
+/// assert_eq!(settlement.amount.as_deref(), Some("10000000"));
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettlementResponse {
@@ -391,6 +417,40 @@ pub struct SupportedKind {
 }
 
 /// The JSON body a facilitator's `/supported` returns.
+///
+/// # Examples
+///
+/// Decode a `/supported` response and check which scheme/network pairs the
+/// facilitator advertises:
+///
+/// ```rust
+/// use sorocharge_x402::SupportedResponse;
+///
+/// let json = r#"{
+///   "kinds": [
+///     {
+///       "x402Version": 2,
+///       "scheme": "exact",
+///       "network": "stellar:testnet"
+///     }
+///   ],
+///   "extensions": [],
+///   "signers": {
+///     "stellar:*": [
+///       "GBHEGW3KWOY2OFH767EDALFGCUTBOEVBDQMCKU4APMDLQNBW5QV3W3KO"
+///     ]
+///   }
+/// }"#;
+///
+/// let supported: SupportedResponse = serde_json::from_str(json).unwrap();
+/// assert_eq!(supported.kinds.len(), 1);
+/// assert_eq!(supported.kinds[0].scheme, "exact");
+/// assert_eq!(supported.kinds[0].network, "stellar:testnet");
+/// assert_eq!(
+///     supported.signers["stellar:*"][0],
+///     "GBHEGW3KWOY2OFH767EDALFGCUTBOEVBDQMCKU4APMDLQNBW5QV3W3KO"
+/// );
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SupportedResponse {

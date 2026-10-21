@@ -85,6 +85,22 @@ pub struct MppClient<'a> {
 }
 
 impl<'a> MppClient<'a> {
+    /// Build a client around an existing Stellar RPC client. All HTTP
+    /// requests the client makes are bounded by `request_timeout`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use std::time::Duration;
+    /// use sorocharge_mpp::MppClient;
+    ///
+    /// let rpc = stellar_rpc_client::Client::new(
+    ///     "https://soroban-testnet.stellar.org",
+    /// )
+    /// .unwrap();
+    /// let client = MppClient::new(&rpc, Duration::from_secs(30)).unwrap();
+    /// ```
+    ///
     /// # Errors
     ///
     /// Returns [`MppError::HttpRequestFailed`] if the underlying HTTP
@@ -108,6 +124,149 @@ impl<'a> MppClient<'a> {
     /// attached in the header the challenge selected (`Authorization` by
     /// default, or `Payment-Authorization` when the challenge requested
     /// it).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use std::time::Duration;
+    /// use ed25519_dalek::{Signer as DalekSigner, SigningKey};
+    /// use sorocharge_mpp::MppClient;
+    /// use sorocharge_signer::{Address, Signer, SorochargeError};
+    /// use stellar_xdr::{AccountId, PublicKey, ScAddress, Uint256};
+    ///
+    /// struct LocalSigner(SigningKey);
+    ///
+    /// impl Signer for LocalSigner {
+    ///     fn sign_preimage(&self, preimage: &[u8]) -> Result<[u8; 64], SorochargeError> {
+    ///         Ok(self.0.sign(preimage).to_bytes())
+    ///     }
+    ///
+    ///     fn address(&self) -> Address {
+    ///         ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(
+    ///             self.0.verifying_key().to_bytes(),
+    ///         ))))
+    ///     }
+    /// }
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let (resource_url, rpc_url) = mock_services()?;
+    /// let signer = LocalSigner(SigningKey::from_bytes(&[0x11; 32]));
+    /// let rpc = stellar_rpc_client::Client::new(&rpc_url)?;
+    /// let client = MppClient::new(&rpc, Duration::from_secs(30))?;
+    ///
+    /// let response = client
+    ///     .get_with_payment(
+    ///         &resource_url,
+    ///         &signer,
+    ///         "Test SDF Network ; September 2015",
+    ///     )
+    ///     .await?;
+    /// assert_eq!(response.status(), reqwest::StatusCode::OK);
+    /// # Ok(())
+    /// # }
+    /// #
+    /// # fn mock_services() -> Result<(String, String), Box<dyn std::error::Error>> {
+    /// #     use std::io::{Read, Write};
+    /// #     use std::net::TcpListener;
+    /// #
+    /// #     use base64::Engine as _;
+    /// #
+    /// #     let listener = TcpListener::bind("127.0.0.1:0")?;
+    /// #     let addr = listener.local_addr()?;
+    /// #     let charge = sorocharge_mpp::ChargeRequest {
+    /// #         amount: "10000000".to_string(),
+    /// #         currency: "CAZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGGJH"
+    /// #             .to_string(),
+    /// #         recipient: "GCQJVJPUPJTVTABP7FK7RXBNFIKKLSM5EO7JP6DECJ77SOBUKWSPB64N"
+    /// #             .to_string(),
+    /// #         description: None,
+    /// #         external_id: None,
+    /// #         method_details: sorocharge_mpp::MethodDetails {
+    /// #             network: "stellar:testnet".to_string(),
+    /// #             fee_payer: true,
+    /// #         },
+    /// #     };
+    /// #     let request = base64::engine::general_purpose::URL_SAFE_NO_PAD
+    /// #         .encode(serde_json::to_vec(&charge)?);
+    /// #     let expires = (chrono::Utc::now() + chrono::Duration::seconds(300)).to_rfc3339();
+    /// #     let challenge = format!(
+    /// #         "Payment id=\"example\", realm=\"api.example.com\", method=\"stellar\", \
+    /// #          intent=\"charge\", request=\"{request}\", expires=\"{expires}\""
+    /// #     );
+    /// #
+    /// #     std::thread::spawn(move || {
+    /// #         for stream in listener.incoming() {
+    /// #             let Ok(mut stream) = stream else { continue };
+    /// #             let mut request = Vec::new();
+    /// #             let mut buf = [0_u8; 1024];
+    /// #             let (head_end, content_length) = loop {
+    /// #                 let Ok(n) = stream.read(&mut buf) else { break (None, 0) };
+    /// #                 if n == 0 {
+    /// #                     break (None, 0);
+    /// #                 }
+    /// #                 request.extend_from_slice(&buf[..n]);
+    /// #                 if let Some(pos) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+    /// #                     let head = String::from_utf8_lossy(&request[..pos]);
+    /// #                     let content_length = head
+    /// #                         .lines()
+    /// #                         .find_map(|line| {
+    /// #                             let (name, value) = line.split_once(':')?;
+    /// #                             name.eq_ignore_ascii_case("content-length")
+    /// #                                 .then(|| value.trim().parse::<usize>().ok())
+    /// #                                 .flatten()
+    /// #                         })
+    /// #                         .unwrap_or(0);
+    /// #                     if request.len() >= pos + 4 + content_length {
+    /// #                         break (Some(pos), content_length);
+    /// #                     }
+    /// #                 }
+    /// #             };
+    /// #             let Some(head_end) = head_end else { continue };
+    /// #             let head = String::from_utf8_lossy(&request[..head_end]);
+    /// #             let lower = head.to_ascii_lowercase();
+    /// #             let request_body = &request[head_end + 4..head_end + 4 + content_length];
+    /// #             let path = head
+    /// #                 .lines()
+    /// #                 .next()
+    /// #                 .and_then(|line| line.split_whitespace().nth(1))
+    /// #                 .unwrap_or("/");
+    /// #             let response = if path == "/rpc" {
+    /// #                 let id = serde_json::from_slice::<serde_json::Value>(request_body)
+    /// #                     .ok()
+    /// #                     .and_then(|request| request.get("id").cloned())
+    /// #                     .unwrap_or(serde_json::json!(1));
+    /// #                 let body = serde_json::json!({
+    /// #                     "jsonrpc": "2.0",
+    /// #                     "id": id,
+    /// #                     "result": {
+    /// #                         "id": "mock-ledger",
+    /// #                         "protocolVersion": 28,
+    /// #                         "sequence": 1000
+    /// #                     }
+    /// #                 })
+    /// #                 .to_string();
+    /// #                 format!(
+    /// #                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+    /// #                     body.len()
+    /// #                 )
+    /// #             } else if lower.contains("authorization:") {
+    /// #                 "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\npaid".to_string()
+    /// #             } else {
+    /// #                 format!(
+    /// #                     "HTTP/1.1 402 Payment Required\r\nWWW-Authenticate: {challenge}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    /// #                 )
+    /// #             };
+    /// #             let _ = stream.write_all(response.as_bytes());
+    /// #         }
+    /// #     });
+    /// #
+    /// #     Ok((
+    /// #         format!("http://{addr}/resource"),
+    /// #         format!("http://{addr}/rpc"),
+    /// #     ))
+    /// # }
+    /// ```
     ///
     /// # Errors
     ///
