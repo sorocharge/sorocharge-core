@@ -40,6 +40,26 @@ const DEFAULT_CHALLENGE_EXPIRY_SECONDS: u64 = 300;
 /// same reason x402's facilitator has one: a fee-sponsoring server is
 /// exposed to fee-exhaustion attacks, and CLAUDE.md asks for the more
 /// conservative reading wherever a requirement is silent on specifics.
+///
+/// # Examples
+///
+/// ```
+/// use sorocharge_mpp::MppServerConfig;
+///
+/// // The defaults are deliberately conservative: a 50,000-stroop fee
+/// // ceiling and a 100-stroop inclusion buffer.
+/// let config = MppServerConfig::default();
+/// assert_eq!(config.max_transaction_fee_stroops, 50_000);
+/// assert_eq!(config.inclusion_buffer_stroops, 100);
+///
+/// // Operators can tighten (or raise) the ceiling to match their own
+/// // tolerance for fee-exhaustion risk.
+/// let config = MppServerConfig {
+///     max_transaction_fee_stroops: 25_000,
+///     inclusion_buffer_stroops: 50,
+/// };
+/// assert_eq!(config.max_transaction_fee_stroops, 25_000);
+/// ```
 #[derive(Debug, Clone)]
 pub struct MppServerConfig {
     pub max_transaction_fee_stroops: i64,
@@ -74,6 +94,43 @@ pub struct MppServer<'a> {
 impl<'a> MppServer<'a> {
     /// `signer` is the server's own fee-paying key, used only for the
     /// sponsored pull-mode flow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use sorocharge_mpp::{MppServer, MppServerConfig};
+    /// # use ed25519_dalek::{Signer as DalekSigner, SigningKey};
+    /// # use sorocharge_signer::{Address, Signer, SorochargeError};
+    /// # use stellar_xdr::{AccountId, PublicKey, ScAddress, Uint256};
+    /// #
+    /// # struct KeypairSigner(SigningKey);
+    /// #
+    /// # impl Signer for KeypairSigner {
+    /// #     fn sign_preimage(&self, preimage: &[u8]) -> Result<[u8; 64], SorochargeError> {
+    /// #         Ok(self.0.sign(preimage).to_bytes())
+    /// #     }
+    /// #
+    /// #     fn address(&self) -> Address {
+    /// #         ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(
+    /// #             self.0.verifying_key().to_bytes(),
+    /// #         ))))
+    /// #     }
+    /// # }
+    ///
+    /// let rpc = stellar_rpc_client::Client::new("https://soroban-testnet.stellar.org")?;
+    /// let fee_payer = KeypairSigner(SigningKey::from_bytes(&[0x22; 32]));
+    ///
+    /// let server = MppServer::new(
+    ///     &rpc,
+    ///     &fee_payer,
+    ///     "Test SDF Network ; September 2015".to_string(),
+    ///     MppServerConfig::default(),
+    /// );
+    /// # let _ = server;
+    /// # Ok(())
+    /// # }
+    /// ```
     #[must_use]
     pub fn new(
         rpc: &'a stellar_rpc_client::Client,
@@ -97,6 +154,70 @@ impl<'a> MppServer<'a> {
     /// `"stellar"`/`"charge"` challenge. `id` and `realm` are the caller's
     /// own — this crate has no opinion on how challenge ids are generated
     /// or how the caller's challenge store keys them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use chrono::{Duration, Utc};
+    /// use sorocharge_mpp::{
+    ///     ChargeRequest, MethodDetails, MppServer, MppServerConfig,
+    /// };
+    /// # use ed25519_dalek::{Signer as DalekSigner, SigningKey};
+    /// # use sorocharge_signer::{Address, Signer, SorochargeError};
+    /// # use stellar_xdr::{AccountId, PublicKey, ScAddress, Uint256};
+    /// #
+    /// # struct KeypairSigner(SigningKey);
+    /// #
+    /// # impl Signer for KeypairSigner {
+    /// #     fn sign_preimage(&self, preimage: &[u8]) -> Result<[u8; 64], SorochargeError> {
+    /// #         Ok(self.0.sign(preimage).to_bytes())
+    /// #     }
+    /// #
+    /// #     fn address(&self) -> Address {
+    /// #         ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(
+    /// #             self.0.verifying_key().to_bytes(),
+    /// #         ))))
+    /// #     }
+    /// # }
+    ///
+    /// let rpc = stellar_rpc_client::Client::new("https://soroban-testnet.stellar.org")?;
+    /// let server_signer = KeypairSigner(SigningKey::from_bytes(&[0x22; 32]));
+    /// let server = MppServer::new(
+    ///     &rpc,
+    ///     &server_signer,
+    ///     "Test SDF Network ; September 2015".to_string(),
+    ///     MppServerConfig::default(),
+    /// );
+    ///
+    /// let charge = ChargeRequest {
+    ///     amount: "42000000".to_string(),
+    ///     currency: "CAZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGGJH"
+    ///         .to_string(),
+    ///     recipient: "GCQJVJPUPJTVTABP7FK7RXBNFIKKLSM5EO7JP6DECJ77SOBUKWSPB64N"
+    ///         .to_string(),
+    ///     description: Some("API access fee".to_string()),
+    ///     external_id: Some("order-42".to_string()),
+    ///     method_details: MethodDetails {
+    ///         network: "stellar:testnet".to_string(),
+    ///         fee_payer: true,
+    ///     },
+    /// };
+    /// let expires = Utc::now() + Duration::minutes(5);
+    ///
+    /// let header = server.build_challenge_header(
+    ///     "kM9xPqWvT2nJrHsY4aDfEb",
+    ///     "api.example.com",
+    ///     &charge,
+    ///     expires,
+    /// )?;
+    ///
+    /// assert!(header.starts_with("Payment "));
+    /// assert!(header.contains("method=\"stellar\""));
+    /// assert!(header.contains("intent=\"charge\""));
+    /// # Ok(())
+    /// # }
+    /// ```
     ///
     /// # Errors
     ///
@@ -130,6 +251,96 @@ impl<'a> MppServer<'a> {
     /// returned receipt's `reference` hash consumed after a successful
     /// return, atomically with respect to concurrent calls for the same
     /// hash. This function does not own that store.
+    ///
+    /// # Examples
+    ///
+    /// This example echoes the issued charge back in a push-mode credential
+    /// and deliberately reports it as already consumed, so it exercises the
+    /// replay-protection guard without contacting Stellar RPC.
+    ///
+    /// ```
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use base64::Engine as _;
+    /// use chrono::Utc;
+    /// use sorocharge_mpp::{
+    ///     Challenge, ChargeRequest, Credential, MethodDetails, MppError, MppServer,
+    ///     MppServerConfig, Payload,
+    /// };
+    /// # use ed25519_dalek::{Signer as DalekSigner, SigningKey};
+    /// # use sorocharge_signer::{Address, Signer, SorochargeError};
+    /// # use stellar_xdr::{AccountId, PublicKey, ScAddress, Uint256};
+    /// #
+    /// # struct KeypairSigner(SigningKey);
+    /// #
+    /// # impl Signer for KeypairSigner {
+    /// #     fn sign_preimage(&self, preimage: &[u8]) -> Result<[u8; 64], SorochargeError> {
+    /// #         Ok(self.0.sign(preimage).to_bytes())
+    /// #     }
+    /// #
+    /// #     fn address(&self) -> Address {
+    /// #         ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(
+    /// #             self.0.verifying_key().to_bytes(),
+    /// #         ))))
+    /// #     }
+    /// # }
+    ///
+    /// let rpc = stellar_rpc_client::Client::new("https://soroban-testnet.stellar.org")?;
+    /// let server_signer = KeypairSigner(SigningKey::from_bytes(&[0x22; 32]));
+    /// let server = MppServer::new(
+    ///     &rpc,
+    ///     &server_signer,
+    ///     "Test SDF Network ; September 2015".to_string(),
+    ///     MppServerConfig::default(),
+    /// );
+    ///
+    /// let expected = ChargeRequest {
+    ///     amount: "42000000".to_string(),
+    ///     currency: "CAZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGGJH"
+    ///         .to_string(),
+    ///     recipient: "GCQJVJPUPJTVTABP7FK7RXBNFIKKLSM5EO7JP6DECJ77SOBUKWSPB64N"
+    ///         .to_string(),
+    ///     description: Some("API access fee".to_string()),
+    ///     external_id: None,
+    ///     method_details: MethodDetails {
+    ///         network: "stellar:testnet".to_string(),
+    ///         fee_payer: false,
+    ///     },
+    /// };
+    ///
+    /// // The credential must echo the exact base64url-JCS `request` the
+    /// // challenge carried, or challenge binding fails before settlement.
+    /// let request = base64::engine::general_purpose::URL_SAFE_NO_PAD
+    ///     .encode(serde_jcs::to_vec(&expected)?);
+    /// let credential = Credential {
+    ///     challenge: Challenge {
+    ///         id: "kM9xPqWvT2nJrHsY4aDfEb".to_string(),
+    ///         realm: "api.example.com".to_string(),
+    ///         method: "stellar".to_string(),
+    ///         intent: "charge".to_string(),
+    ///         request,
+    ///         description: None,
+    ///         opaque: None,
+    ///         digest: None,
+    ///         expires: None,
+    ///         header: None,
+    ///     },
+    ///     payload: Payload::Hash {
+    ///         hash: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
+    ///             .to_string(),
+    ///     },
+    ///     source: None,
+    /// };
+    ///
+    /// // `already_consumed` must come from the caller's own replay store.
+    /// let result = server
+    ///     .settle_credential(&credential, &expected, Utc::now(), true)
+    ///     .await;
+    ///
+    /// assert!(matches!(result, Err(MppError::HashAlreadyConsumed)));
+    /// # Ok(())
+    /// # }
+    /// ```
     ///
     /// # Errors
     ///
