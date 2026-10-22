@@ -364,6 +364,7 @@ pub struct Credential {
 ///     reference: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd".to_string(),
 ///     status: "success".to_string(),
 ///     timestamp: "2025-02-05T12:05:00Z".to_string(),
+///     external_id: None,
 /// };
 ///
 /// let json = serde_json::to_string(&receipt).unwrap();
