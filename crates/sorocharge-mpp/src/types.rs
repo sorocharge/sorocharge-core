@@ -110,6 +110,21 @@ where
 }
 
 /// The Stellar-specific `methodDetails` object inside a charge request.
+///
+/// # Examples
+///
+/// ```rust
+/// use sorocharge_mpp::MethodDetails;
+///
+/// let details = MethodDetails {
+///     network: "stellar:testnet".to_string(),
+///     fee_payer: true,
+/// };
+///
+/// let json = serde_json::to_value(&details).unwrap();
+/// assert_eq!(json["network"], "stellar:testnet");
+/// assert_eq!(json["feePayer"], true);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MethodDetails {
@@ -338,6 +353,28 @@ pub struct Credential {
 }
 
 /// The `Payment-Receipt` header payload on a successful settlement.
+///
+/// # Examples
+///
+/// ```rust
+/// use sorocharge_mpp::Receipt;
+///
+/// let receipt = Receipt {
+///     method: "stellar".to_string(),
+///     reference: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd".to_string(),
+///     status: "success".to_string(),
+///     timestamp: "2025-02-05T12:05:00Z".to_string(),
+///     external_id: None,
+/// };
+///
+/// let json = serde_json::to_string(&receipt).unwrap();
+/// let decoded: Receipt = serde_json::from_str(&json).unwrap();
+/// assert_eq!(decoded, receipt);
+/// assert_eq!(decoded.method, "stellar");
+/// assert_eq!(decoded.reference, "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd");
+/// assert_eq!(decoded.status, "success");
+/// assert_eq!(decoded.timestamp, "2025-02-05T12:05:00Z");
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Receipt {
