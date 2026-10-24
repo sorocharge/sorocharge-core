@@ -4,7 +4,7 @@ This document describes the security considerations and threat model for `soroch
 It is intended to make explicit what the library defends against and what is explicitly out of scope,
 so that security reviews are faster and more complete.
 
-## Attacker Models and Defenses
+# Attacker Models and Defenses
 
 ### 1. Malicious Payer
 
