@@ -565,6 +565,75 @@ mod golden_vector_tests {
     }
 }
 
+/// Regression tests for `SignedEntry::from_xdr`: the doc comment's claim
+/// that the constructor performs no validation — specifically, that it does
+/// not check whether the entry carries a non-placeholder signature.
+///
+/// Audit result (issue #219): **clean** — `from_xdr` is a bare `Self(entry)`
+/// newtype wrap; the doc comment's "no validation" claim is accurate. These
+/// tests exist so a future addition of validation cannot silently contradict
+/// the documented contract.
+#[cfg(test)]
+mod from_xdr_audit_tests {
+    use super::*;
+    use crate::entry::{build_charge_entry, ChargeParams, CredentialKind};
+    use stellar_xdr::ReadXdr;
+
+    fn test_params() -> ChargeParams {
+        ChargeParams {
+            asset_contract: "CAZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGGJH"
+                .parse()
+                .unwrap(),
+            amount: 1_000_000,
+            payer: "GDIEVMRSOQV3JKZ2CNUL2RQV4TTNAISKW4NAC25PQUQKGMWJO6DTOAE7"
+                .parse()
+                .unwrap(),
+            recipient: "GCQJVJPUPJTVTABP7FK7RXBNFIKKLSM5EO7JP6DECJ77SOBUKWSPB64N"
+                .parse()
+                .unwrap(),
+            valid_until_ledger: 500,
+        }
+    }
+
+    #[test]
+    fn from_xdr_accepts_unsigned_placeholder_entry_without_validation() {
+        // `build_charge_entry` produces an entry whose `signature` field is
+        // the empty-vec placeholder; it carries no actual ed25519 bytes.
+        // `from_xdr` must accept it without error — the doc comment says it
+        // "performs no validation … let alone a valid one".
+        let unsigned = build_charge_entry(&test_params(), CredentialKind::Legacy)
+            .expect("build unsigned entry");
+        let xdr = unsigned.as_xdr().clone();
+
+        // This is the line under audit: if it panics or returns an error,
+        // the doc comment's "no validation" claim would be false.
+        let wrapped = SignedEntry::from_xdr(xdr);
+        let _ = wrapped.as_xdr();
+    }
+
+    #[test]
+    fn from_xdr_round_trips_the_entry_bytes() {
+        // `from_xdr` must preserve the entry exactly — no mutation on wrap.
+        let unsigned = build_charge_entry(&test_params(), CredentialKind::AddressV2)
+            .expect("build unsigned entry");
+        let original = unsigned.as_xdr().clone();
+        let original_bytes = original
+            .to_xdr(stellar_xdr::Limits::none())
+            .expect("encode original");
+
+        let wrapped = SignedEntry::from_xdr(original);
+        let round_trip_bytes = wrapped
+            .as_xdr()
+            .to_xdr(stellar_xdr::Limits::none())
+            .expect("encode wrapped");
+
+        assert_eq!(
+            original_bytes, round_trip_bytes,
+            "from_xdr must not mutate the entry"
+        );
+    }
+}
+
 #[cfg(test)]
 mod network_id_tests {
     use super::network_id_hash;
