@@ -33,8 +33,10 @@ fn parse_expires(expires: Option<&str>) -> DateTime<Utc> {
 /// Retries an HTTP GET request with bounded backoff for transient failures.
 ///
 /// - Retries up to `MAX_RETRY_ATTEMPTS` times (default 3).
-/// - On 5xx or connection-level errors, waits with exponential backoff
-///   (1s, 2s, 4s...).
+/// - On connection-level errors (transport failures returned by `send()`),
+///   waits with exponential backoff (1s, 2s, 4s...). Protocol-level responses
+///   (200, 402, 5xx, etc.) are returned to the caller immediately without
+///   retrying — those are deliberate server responses, not transient failures.
 /// - Each attempt respects the client's `request_timeout`, so total wall-clock
 ///   time is bounded by `timeout * attempts` plus backoff.
 /// - On success, returns the successful response immediately.
@@ -64,7 +66,7 @@ async fn retry_get<T: reqwest::IntoUrl + Clone>(
                 if attempt < MAX_RETRY_ATTEMPTS {
                     // Exponential backoff: 1s, 2s, 4s, ...
                     let backoff = std::time::Duration::from_secs(
-                        1u64.saturating_pow(attempt.saturating_sub(1)),
+                        2u64.saturating_pow(attempt.saturating_sub(1)),
                     );
                     tokio::time::sleep(backoff).await;
                 }
@@ -955,6 +957,35 @@ mod tests {
             matches!(result, Err(MppError::HttpRequestFailed { ref reason }) if reason.contains("request attempt")),
             "expected HttpRequestFailed, got {result:?}"
         );
+    }
+
+    /// Regression test for the retry_get backoff formula: 1u64.saturating_pow(n) is
+    /// always 1, not exponential. The fix is 2u64.saturating_pow(n), giving 1s, 2s, 4s.
+    ///
+    /// This test verifies that retry_get exhausts all MAX_RETRY_ATTEMPTS attempts on a
+    /// connection-level failure (port 1 is refused immediately) by checking that the final
+    /// error message names attempt 3 — confirming the loop ran all three times. The
+    /// timeout is kept short (10ms) so the test stays fast even with real backoff sleeps.
+    #[tokio::test]
+    async fn retry_get_exhausts_all_attempts_and_reports_final_attempt_on_connection_failure() {
+        let http = reqwest::Client::builder()
+            // Short timeout so each of the three connection attempts fails quickly.
+            // The backoff sleeps (1s + 2s with the fixed formula) are the dominant
+            // cost; the test is still bounded because the port is refused instantly.
+            .timeout(std::time::Duration::from_millis(10))
+            .build()
+            .expect("http client");
+        // Port 1 is refused immediately on most systems.
+        let result = retry_get(&http, "http://127.0.0.1:1/").await;
+        match result {
+            Err(MppError::HttpRequestFailed { reason }) => {
+                assert!(
+                    reason.contains("request attempt 3"),
+                    "expected final-attempt error (attempt 3), got: {reason}"
+                );
+            }
+            other => panic!("expected HttpRequestFailed, got {other:?}"),
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
