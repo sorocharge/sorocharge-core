@@ -171,14 +171,15 @@ fn is_valid_ed25519_signature(address: &Address, payload: &[u8; 32], scval: &ScV
 ///    asset/amount/recipient, regardless of whose key actually signed it —
 ///    added per this project's brief to resolve spec ambiguity toward the
 ///    more conservative reading.
-/// 6. [`SorochargeError::AmountNonPositive`] — the caller's
-///    `expected.amount` is zero or negative, so no signed entry could ever
-///    legitimately match it; this precondition is checked before the amount
-///    diff so the caller's own invalid expectation is reported as such
-///    rather than surfacing as [`SorochargeError::AmountMismatch`].
-/// 7. [`SorochargeError::AmountMismatch`] — the amount differs.
-/// 8. [`SorochargeError::RecipientMismatch`] — the recipient differs.
-/// 9. [`SorochargeError::InvalidSignature`] — no signable node (the
+/// 7. [`SorochargeError::AmountNonPositive`] — the entry's own transfer
+///    amount is zero or negative (the `i128` value embedded in the signed
+///    invocation). `expected.amount` has already been proved positive by
+///    step 1; this step catches a non-positive amount on the entry side,
+///    reported distinctly so it doesn't surface as
+///    [`SorochargeError::AmountMismatch`].
+/// 8. [`SorochargeError::AmountMismatch`] — the amount differs.
+/// 9. [`SorochargeError::RecipientMismatch`] — the recipient differs.
+/// 10. [`SorochargeError::InvalidSignature`] — no signable node (the
 ///    top-level address, or, for `Delegated`, any delegate) carries a valid
 ///    ed25519 signature over the reconstructed `HashIdPreimage`. A
 ///    `Delegated` entry's account-contract-specific signing *policy*
@@ -695,6 +696,53 @@ mod tests {
             &f.network_passphrase,
         );
         assert_eq!(result, Err(SorochargeError::UnexpectedInvocationShape));
+    }
+
+    /// Verifies the amount check at step 7 of `verify_entry`'s ordering: a
+    /// non-positive amount embedded in the signed invocation (not in
+    /// `expected`) must surface as `AmountNonPositive`, never as
+    /// `AmountMismatch`. The check fires before the signature check (step 10),
+    /// so the tampered XDR's now-invalid signature does not interfere.
+    #[test]
+    fn rejects_a_non_positive_transfer_amount_in_the_entry_itself() {
+        use stellar_xdr::{Int128Parts, SorobanAuthorizedFunction};
+
+        let f = load();
+        let xdr_entry = f.signed.as_xdr().clone();
+
+        // Replace the transfer's amount arg with zero, leaving every other
+        // field (credentials, invocation shape, addresses) intact.
+        let SorobanAuthorizedFunction::ContractFn(mut invoke) =
+            xdr_entry.root_invocation.function.clone()
+        else {
+            panic!("fixture should authorize a ContractFn");
+        };
+        let mut args: Vec<_> = invoke.args.to_vec();
+        // args[2] is the i128 transfer amount; zero it out.
+        args[2] = stellar_xdr::ScVal::I128(Int128Parts { hi: 0, lo: 0 });
+        invoke.args = args.try_into().unwrap();
+
+        let tampered = SignedEntry(SorobanAuthorizationEntry {
+            credentials: xdr_entry.credentials,
+            root_invocation: stellar_xdr::SorobanAuthorizedInvocation {
+                function: SorobanAuthorizedFunction::ContractFn(invoke),
+                sub_invocations: xdr_entry.root_invocation.sub_invocations,
+            },
+        });
+
+        // expected.amount is positive (from the fixture); only the entry's
+        // own transfer amount is zero — that is what this test covers.
+        let result = verify_entry(
+            &tampered,
+            &f.expected,
+            f.valid_until_ledger - 1,
+            &f.network_passphrase,
+        );
+        assert_eq!(
+            result,
+            Err(SorochargeError::AmountNonPositive),
+            "a zero transfer amount in the entry should surface as AmountNonPositive, not AmountMismatch"
+        );
     }
 
     mod delegated_threshold {

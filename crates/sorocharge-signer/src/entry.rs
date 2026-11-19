@@ -14,8 +14,8 @@ use crate::error::SorochargeError;
 /// in a shape the reference SDKs don't also produce.
 pub type Address = ScAddress;
 
-/// Decodes a SEP-23 strkey (`G...` account, `C...` contract, `M...` muxed
-/// account) into an [`Address`].
+/// Decodes a SEP-23 strkey (`G...` account or `C...` contract) into an
+/// [`Address`].
 ///
 /// The protocol adapters this library serves receive addresses as JSON
 /// strings, while every structure built, signed, and verified here carries
@@ -26,12 +26,17 @@ pub type Address = ScAddress;
 /// address") rather than a generic parse error, per the constraint that
 /// every public error variant is distinct enough to act on differently.
 ///
+/// Note: `M...` muxed-account strkeys are **not** supported. `ScAddress`
+/// only has `Account` (`G...`) and `Contract` (`C...`) variants; a muxed
+/// account is a `MuxedAccount`, not an `ScAddress`, and will be rejected
+/// with [`SorochargeError::InvalidAddress`].
+///
 /// # Errors
 ///
 /// Returns [`SorochargeError::InvalidAddress`] with `strkey` set to the
 /// input string whenever it fails to decode into an [`ScAddress`]: bad
 /// length, bad base32, a broken checksum, or a well-formed strkey of a
-/// type that is not an address (e.g. a secret key).
+/// type that is not an address (e.g. a secret key or a muxed account).
 pub fn parse_address(strkey: &str) -> Result<Address, SorochargeError> {
     strkey
         .parse::<Address>()
