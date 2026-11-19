@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Root workspace (Cargo.toml at the repo root covers all crates/*)
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  # npm dependencies for the golden-vector generator
+  - package-ecosystem: npm
+    directory: /tests/golden_vectors
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

@@ -323,10 +323,15 @@ fn random_nonce() -> Result<i64, SorochargeError> {
 ///
 /// # Errors
 ///
-/// Returns [`SorochargeError::UnsupportedCredentialType`] for a
-/// `credential` this build of the library does not yet construct XDR for,
-/// and [`SorochargeError::XdrEncodingFailed`] if a value can't be encoded
-/// into its XDR-constrained shape (e.g. a `VecM` length limit).
+/// - [`SorochargeError::AmountNonPositive`] if `params.amount` is zero or
+///   negative.
+/// - [`SorochargeError::EmptyDelegateSigners`] if `credential` is
+///   [`CredentialKind::Delegated`] with an empty signer list.
+/// - [`SorochargeError::DuplicateDelegateSigner`] if `credential` is
+///   [`CredentialKind::Delegated`] with any repeated signer address.
+/// - [`SorochargeError::XdrEncodingFailed`] if the nonce cannot be generated
+///   or any value can't be encoded into its XDR-constrained shape (e.g. a
+///   `VecM` length limit).
 ///
 /// # Example
 ///
