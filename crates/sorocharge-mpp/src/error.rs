@@ -75,12 +75,46 @@ pub enum MppError {
         reason: String,
     },
     /// The pushed transaction hash has already been consumed (replay).
+    ///
+    /// **Audit (issue #306):** one call site — `settle_push_mode` in
+    /// `server.rs`, guarded by the `already_consumed` flag the caller
+    /// derives from its own replay store. That site returns this variant
+    /// exactly when the hash was previously seen, which is precisely "the
+    /// pushed transaction hash has already been consumed (replay)."
+    /// No mismatch found; audit is clean.
     HashAlreadyConsumed,
-    /// The credential failed one of the spec's verification checks.
+    /// A verification check failed: the credential's signature and structural
+    /// validation, transfer-amount and recipient checks, timeBounds and
+    /// sponsorship constraints, or (for sponsored pull mode) the fee-ceiling
+    /// check that guards against submitting a resource-fee above the
+    /// operator-configured limit.
+    ///
+    /// **Audit (issue #307):** call sites span `server.rs` and `client.rs`.
+    /// All but one match the original "credential failed a spec verification
+    /// check" framing directly — invalid credential shape, mismatched
+    /// transfer fields, failed `verify_entry`, failed `verify_transfer_effects`,
+    /// invalid timeBounds, or a simulation error.
+    ///
+    /// One deliberate fold-in: `server.rs` returns this variant when the
+    /// sponsored-mode resource fee exceeds `max_transaction_fee_stroops`.
+    /// That check is not about the credential itself, but it occurs in the
+    /// same pre-settlement verification pass and there is no more specific
+    /// variant for it in `MppError`. It is documented here rather than
+    /// silently left as an apparent mismatch.
     VerificationFailed {
         reason: String,
     },
     /// Verification succeeded but on-chain settlement failed.
+    ///
+    /// **Audit (issue #308):** three call sites, all inside
+    /// `settle_pull_mode` in `server.rs`, all in the sponsored path or the
+    /// unsponsored path after all verification checks have passed:
+    /// (1) `send_transaction_polling` returns an error (RPC-level failure),
+    /// (2) the same for the unsponsored envelope, and
+    /// (3) the polled transaction's final status field is not `"SUCCESS"`.
+    /// Every site fires only after the credential has been accepted and
+    /// settlement was attempted, which matches "Verification succeeded but
+    /// on-chain settlement failed." No mismatch found; audit is clean.
     SettlementFailed {
         reason: String,
     },
