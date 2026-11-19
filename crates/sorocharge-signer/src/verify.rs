@@ -333,6 +333,55 @@ pub fn verify_entry(
 /// only accepts legacy `Address` credentials for pull mode. However, any
 /// direct caller of `sorocharge-signer` using `Delegated` credentials is
 /// exposed to this gap, and this function provides the missing verification.
+///
+/// # Examples
+///
+/// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// use ed25519_dalek::{Signer as DalekSigner, SigningKey};
+/// use sorocharge_signer::{
+///     build_charge_entry, parse_address, sign_entry, verify_delegated_threshold,
+///     Address, ChargeParams, CredentialKind, SorochargeError, Signer,
+/// };
+/// use stellar_xdr::{AccountId, PublicKey, ScAddress, Uint256};
+///
+/// struct LocalSigner(SigningKey);
+///
+/// impl Signer for LocalSigner {
+///     fn sign_preimage(&self, preimage: &[u8]) -> Result<[u8; 64], SorochargeError> {
+///         Ok(self.0.sign(preimage).to_bytes())
+///     }
+///     fn address(&self) -> Address {
+///         ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(
+///             self.0.verifying_key().to_bytes(),
+///         ))))
+///     }
+/// }
+///
+/// let delegate = LocalSigner(SigningKey::from_bytes(&[0x11; 32]));
+/// let params = ChargeParams {
+///     asset_contract: parse_address("CAZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGGJH")?,
+///     amount: 1_000,
+///     payer: parse_address("GDIEVMRSOQV3JKZ2CNUL2RQV4TTNAISKW4NAC25PQUQKGMWJO6DTOAE7")?,
+///     recipient: parse_address("GCQJVJPUPJTVTABP7FK7RXBNFIKKLSM5EO7JP6DECJ77SOBUKWSPB64N")?,
+///     valid_until_ledger: 100_000,
+/// };
+///
+/// // A single delegate with threshold=1: one valid signature satisfies the policy.
+/// let unsigned = build_charge_entry(
+///     &params,
+///     CredentialKind::Delegated {
+///         signers: vec![delegate.address()],
+///     },
+/// )?;
+/// let network = "Test SDF Network ; September 2015";
+/// let signed = sign_entry(unsigned, &delegate, network)?;
+///
+/// let weights = vec![(delegate.address(), 1u32)];
+/// verify_delegated_threshold(&signed, &params, 99_999, network, &weights, 1)?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn verify_delegated_threshold(
     entry: &SignedEntry,
     expected: &ChargeParams,

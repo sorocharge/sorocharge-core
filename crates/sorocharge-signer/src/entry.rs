@@ -32,6 +32,26 @@ pub type Address = ScAddress;
 /// input string whenever it fails to decode into an [`ScAddress`]: bad
 /// length, bad base32, a broken checksum, or a well-formed strkey of a
 /// type that is not an address (e.g. a secret key).
+///
+/// # Examples
+///
+/// ```
+/// use sorocharge_signer::parse_address;
+///
+/// // A valid G... account address decodes successfully.
+/// let addr = parse_address("GDIEVMRSOQV3JKZ2CNUL2RQV4TTNAISKW4NAC25PQUQKGMWJO6DTOAE7")?;
+/// // The returned Address is an ScAddress::Account variant.
+/// assert!(matches!(addr, stellar_xdr::ScAddress::Account(_)));
+///
+/// // A valid C... contract address decodes successfully.
+/// let contract = parse_address("CAZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGGJH")?;
+/// assert!(matches!(contract, stellar_xdr::ScAddress::Contract(_)));
+///
+/// // An invalid strkey returns InvalidAddress carrying the original string.
+/// let err = parse_address("not-a-valid-address").unwrap_err();
+/// assert!(matches!(err, sorocharge_signer::SorochargeError::InvalidAddress { .. }));
+/// # Ok::<(), sorocharge_signer::SorochargeError>(())
+/// ```
 pub fn parse_address(strkey: &str) -> Result<Address, SorochargeError> {
     strkey
         .parse::<Address>()

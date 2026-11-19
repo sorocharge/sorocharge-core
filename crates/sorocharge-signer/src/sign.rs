@@ -139,6 +139,29 @@ impl SignedEntry {
 /// this crate bakes into each signing payload, rather than each carrying
 /// its own copy of the identical five lines (a drift risk this project's
 /// "one audited signing engine, not two" brief exists to prevent).
+///
+/// # Examples
+///
+/// ```
+/// use sorocharge_signer::network_id_hash;
+///
+/// // Testnet network ID is well-known and stable.
+/// let hash = network_id_hash("Test SDF Network ; September 2015");
+/// assert_eq!(hash.len(), 32);
+/// assert_eq!(
+///     hash,
+///     [
+///         0xce, 0xe0, 0x30, 0x2d, 0x59, 0x84, 0x4d, 0x32,
+///         0xbd, 0xca, 0x91, 0x5c, 0x82, 0x03, 0xdd, 0x44,
+///         0xb3, 0x3f, 0xbb, 0x7e, 0xdc, 0x19, 0x05, 0x1e,
+///         0xa3, 0x7a, 0xbe, 0xdf, 0x28, 0xec, 0xd4, 0x72,
+///     ]
+/// );
+///
+/// // Different passphrases produce different network IDs.
+/// let pubnet = network_id_hash("Public Global Stellar Network ; September 2015");
+/// assert_ne!(hash, pubnet);
+/// ```
 #[must_use]
 pub fn network_id_hash(network_passphrase: &str) -> [u8; 32] {
     Sha256::digest(network_passphrase.as_bytes()).into()
