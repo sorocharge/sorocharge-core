@@ -5,7 +5,7 @@ use sorocharge_signer::SorochargeError;
 ///
 /// # Errors
 ///
-/// Returns [`SorochargeError::UnsupportedNetwork`] for any passphrase other than
+/// Returns [`MppError::UnsupportedNetwork`] for any passphrase other than
 /// mainnet's or testnet's.
 pub fn caip2_for_passphrase(network_passphrase: &str) -> Result<&'static str, MppError> {
     sorocharge_signer::caip2_for_passphrase(network_passphrase).map_err(|e| match e {

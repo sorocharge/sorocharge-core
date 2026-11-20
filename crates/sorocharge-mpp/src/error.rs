@@ -34,16 +34,41 @@ pub enum MppError {
     UnsupportedIntent {
         intent: String,
     },
-    /// The challenge's `request` field did not base64url-decode to valid
-    /// charge-request JSON.
+    /// The charge request payload failed base64url/JSON decoding, JCS
+    /// serialization, or semantic field parsing (`currency`, `amount`, or
+    /// `recipient`).
+    ///
+    /// Returned by:
+    /// - `decode_base64url_json` in `client.rs` when the challenge's `request`
+    ///   parameter is not valid base64url or does not deserialize into `ChargeRequest`.
+    /// - `MppClient` in `client.rs` and `MppServer` in `server.rs` when `currency`,
+    ///   `amount`, or `recipient` in the charge request cannot be parsed into
+    ///   their respective Stellar address / `i128` types.
+    /// - `encode_base64url_jcs` in `header.rs` (via `MppServer::build_challenge_header`)
+    ///   if RFC 8785 JCS serialization of the charge request fails.
+    /// Audited for issue #294.
     InvalidChargeRequest {
         reason: String,
     },
-    /// A network identifier this crate does not have a CAIP-2 mapping for.
+    /// A network passphrase or CAIP-2 network identifier that this crate does
+    /// not support or that does not match the configured Stellar network.
+    ///
+    /// Returned by:
+    /// - `caip2_for_passphrase` in `network.rs` when the configured Stellar
+    ///   network passphrase is neither mainnet nor testnet (mapped from
+    ///   `SorochargeError::UnsupportedNetwork`).
+    /// - `MppClient` in `client.rs` and `MppServer` in `server.rs` when the
+    ///   challenge's `method_details.network` CAIP-2 identifier does not match
+    ///   the expected CAIP-2 identifier for the active network passphrase.
+    /// Audited for issue #295.
     UnsupportedNetwork {
         network: String,
     },
     /// The challenge has already passed its `expires` timestamp.
+    ///
+    /// Returned by `MppClient` in `client.rs` (when `expires_at <= Utc::now()`)
+    /// and by `MppServer` in `server.rs` (when `current_time > expires_at`).
+    /// Audited for issue #296; no mismatch found.
     ChallengeExpired,
     /// `sorocharge-signer` failed to build or sign the charge entry.
     Signing(SorochargeError),
@@ -60,18 +85,48 @@ pub enum MppError {
     },
     /// The transaction does not authorize a single, bare SEP-41
     /// `transfer(from, to, amount)` call.
+    ///
+    /// Returned exclusively by `parse_payment_transaction` in `tx.rs` when the
+    /// envelope is not `ENVELOPE_TYPE_TX` (v1), does not contain exactly one
+    /// `InvokeHostFunction` operation invoking `transfer` with 3 arguments
+    /// (`address, address, i128`), or does not carry a single matching
+    /// `SorobanAuthorizationEntry` with no sub-invocations.
+    /// Audited for issue #301; no mismatch found.
     UnexpectedTransactionShape {
         reason: String,
     },
     /// An authorization entry used a credential type the spec forbids for
-    /// pull mode (anything other than legacy `sorobanCredentialsAddress`).
+    /// pull mode (anything other than `SorobanCredentials::Address`).
+    ///
+    /// Returned by `parse_payment_transaction` in `tx.rs` and `extract_auth_signer`
+    /// in `server.rs` when `auth_entry.credentials` is not
+    /// `SorobanCredentials::Address`. (In push mode, `settle_push_mode` in
+    /// `server.rs` explicitly tolerates this variant because the transaction has
+    /// already settled on-chain.)
+    /// Audited for issue #302; no mismatch found.
     ForbiddenCredentialType,
     /// A push-mode (`type="hash"`) credential was submitted against a
     /// challenge that specified `feePayer: true`, which the spec forbids.
+    ///
+    /// Returned by `settle_push_mode` in `server.rs` when
+    /// `expected.method_details.fee_payer` is `true`.
+    /// Audited for issue #303; no mismatch found.
     PushModeForbidsFeePayer,
-    /// The server's own address appeared where the safety checks forbid it.
+    /// The server's own address appeared as the transfer sender (`transfer.from`)
+    /// or fee/auth payer (`params.payer`) in pull mode, which the server-side
+    /// self-payment safety checks forbid.
+    ///
+    /// Returned by `settle_pull_mode` in `server.rs` when `transfer.from == server`
+    /// or `params.payer == server`.
+    /// Audited for issue #304; no mismatch found.
     ServerAddressConflict,
-    /// A call to Stellar RPC failed.
+    /// A call to Stellar RPC failed at the transport or RPC response layer.
+    ///
+    /// Returned by `MppClient` in `client.rs` (`get_latest_ledger`, `get_account`,
+    /// `simulate_transaction_envelope`) and `MppServer` in `server.rs`
+    /// (`get_transaction`, `get_latest_ledger`, `simulate_transaction_envelope`,
+    /// `get_account`) when a Stellar RPC request returns an error.
+    /// Audited for issue #305; no mismatch found.
     RpcFailed {
         reason: String,
     },
