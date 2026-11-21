@@ -669,4 +669,84 @@ mod tests {
             "expected UnexpectedTransactionShape for auth entry invocation mismatch, got {result:?}"
         );
     }
+
+    /// Audit regression for `parse_payment_transaction` (issue #235).
+    ///
+    /// The doc comment states the function accepts **only** the legacy
+    /// `sorobanCredentialsAddress` arm — the only type
+    /// `draft-stellar-charge-00` permits for pull mode — and returns
+    /// `MppError::ForbiddenCredentialType` for any other credential.
+    ///
+    /// `parse_rejects_address_v2_credentials` already exercises the
+    /// `AddressV2` rejection path.  This test drives `AddressWithDelegates`
+    /// to confirm that *all* non-legacy arms are rejected, not just `AddressV2`.
+    ///
+    /// Audit result: **clean** — line 205 checks
+    /// `SorobanCredentials::Address(_)` exclusively; the doc comment is
+    /// accurate.
+    /// Audit regression for `parse_payment_transaction` (issue #235).
+    ///
+    /// The doc comment states the function accepts **only** the legacy
+    /// `sorobanCredentialsAddress` arm — the only type
+    /// `draft-stellar-charge-00` permits for pull mode — and returns
+    /// `MppError::ForbiddenCredentialType` for any other credential.
+    ///
+    /// `parse_rejects_address_v2_credentials` already exercises the
+    /// `AddressV2` rejection path.  This test drives `AddressWithDelegates`
+    /// to confirm that *all* non-legacy arms are rejected, not just `AddressV2`.
+    ///
+    /// Audit result: **clean** — line 205 checks
+    /// `SorobanCredentials::Address(_)` exclusively; the doc comment is
+    /// accurate.
+    #[test]
+    fn parse_rejects_delegates_credentials_as_forbidden() {
+        use stellar_xdr::{SorobanAddressCredentialsWithDelegates, SorobanCredentials, VecM};
+
+        let params = test_params();
+
+        // Build a minimal `AddressWithDelegates` envelope by swapping the
+        // credential arm in a sponsored envelope rather than using a full
+        // signing flow (this test only needs the credential type check to run).
+        let signer = TestSigner {
+            signing_key: SigningKey::from_bytes(&[0x11u8; 32]),
+            address: params.payer.clone(),
+        };
+        let unsigned = build_charge_entry(&params, CredentialKind::Legacy).unwrap();
+        let signed = sign_entry(unsigned, &signer, "Test SDF Network ; September 2015").unwrap();
+        let envelope = build_sponsored_envelope(&params, &signed).unwrap();
+        let TransactionEnvelope::Tx(mut v1) = envelope else {
+            panic!()
+        };
+
+        // Replace the legacy credential with a Delegates credential so the
+        // ForbiddenCredentialType branch fires.
+        let mut invoke_op = match &v1.tx.operations[0].body {
+            stellar_xdr::OperationBody::InvokeHostFunction(op) => op.clone(),
+            _ => panic!(),
+        };
+        let mut auth = invoke_op.auth[0].clone();
+        let delegates_creds = SorobanCredentials::AddressWithDelegates(
+            SorobanAddressCredentialsWithDelegates {
+                address_credentials: match auth.credentials {
+                    SorobanCredentials::Address(c) => c,
+                    _ => panic!(),
+                },
+                delegates: VecM::default(),
+            },
+        );
+        auth.credentials = delegates_creds;
+        invoke_op.auth = vec![auth].try_into().unwrap();
+        v1.tx.operations = vec![stellar_xdr::Operation {
+            source_account: None,
+            body: stellar_xdr::OperationBody::InvokeHostFunction(invoke_op),
+        }]
+        .try_into()
+        .unwrap();
+
+        let result = parse_payment_transaction(&TransactionEnvelope::Tx(v1));
+        assert!(
+            matches!(result, Err(MppError::ForbiddenCredentialType)),
+            "expected ForbiddenCredentialType for AddressWithDelegates, got {result:?}"
+        );
+    }
 }

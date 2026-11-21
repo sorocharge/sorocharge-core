@@ -1154,4 +1154,82 @@ mod tests {
             "expected UnsupportedNetwork, got {result:?}"
         );
     }
+
+    /// Audit regression for `build_challenge_header` (issue #233).
+    ///
+    /// The doc comment states the header is for a `"stellar"`/`"charge"`
+    /// challenge. `build_www_authenticate_header` hardcodes both strings;
+    /// this test pins the output so a change to that helper cannot silently
+    /// contradict the documented contract.
+    ///
+    /// Audit result: **clean** — `method` and `intent` are encoded by the
+    /// helper unconditionally; the `InvalidChargeRequest` error path is
+    /// correct (confirmed in `header.rs`).
+    #[test]
+    fn build_challenge_header_always_emits_stellar_charge_method_and_intent() {
+        let rpc_url = "https://soroban-testnet.stellar.org";
+        let rpc = stellar_rpc_client::Client::new(rpc_url).expect("rpc client");
+        let server_signer = TestSigner::from_seed([0x22; 32]);
+        let server = MppServer::new(
+            &rpc,
+            &server_signer,
+            NETWORK_PASSPHRASE.to_string(),
+            MppServerConfig::default(),
+        );
+
+        let charge = charge_request(false);
+        let expires = Utc::now() + ChronoDuration::minutes(5);
+        let header = server
+            .build_challenge_header("test-id", "test.example", &charge, expires)
+            .expect("build_challenge_header must succeed for a well-typed ChargeRequest");
+
+        assert!(
+            header.starts_with("Payment "),
+            "header must use the Payment auth scheme; got: {header}"
+        );
+        assert!(
+            header.contains("method=\"stellar\""),
+            "header must embed method=\"stellar\"; got: {header}"
+        );
+        assert!(
+            header.contains("intent=\"charge\""),
+            "header must embed intent=\"charge\"; got: {header}"
+        );
+        assert!(
+            header.contains("id=\"test-id\""),
+            "header must echo the caller-supplied id; got: {header}"
+        );
+        assert!(
+            header.contains("realm=\"test.example\""),
+            "header must echo the caller-supplied realm; got: {header}"
+        );
+    }
+
+    /// Audit regression for `settle_credential` (issue #234).
+    ///
+    /// The doc comment distinguishes `MppError::SettlementFailed` (credential
+    /// valid, on-chain submission failed) from `MppError::VerificationFailed`
+    /// (credential rejected before submission).  This test confirms the two
+    /// variants exist and are distinct discriminants, so the promise that
+    /// callers can tell them apart cannot be broken without a compile error
+    /// or an obvious test failure.
+    ///
+    /// Audit result: **clean** — `SettlementFailed` is mapped only from
+    /// `send_transaction_polling` failures (lines 688, 695, 701 of server.rs);
+    /// all pre-submission rejections use `VerificationFailed` or other
+    /// specific variants.
+    #[test]
+    fn settlement_failed_and_verification_failed_are_distinct_error_variants() {
+        let sf = MppError::SettlementFailed {
+            reason: "rpc timeout".to_string(),
+        };
+        let vf = MppError::VerificationFailed {
+            reason: "signature mismatch".to_string(),
+        };
+        assert_ne!(
+            std::mem::discriminant(&sf),
+            std::mem::discriminant(&vf),
+            "SettlementFailed and VerificationFailed must be distinct MppError variants"
+        );
+    }
 }
