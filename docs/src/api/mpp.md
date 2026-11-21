@@ -124,6 +124,9 @@ pub struct Receipt {
 
 ## `MppError`
 
+For what each variant usually means in practice and what to check first, see
+[Troubleshooting errors](../guides/troubleshooting.md).
+
 | Variant | Meaning |
 |---|---|
 | `HttpRequestFailed { reason }` | The HTTP request itself failed. |

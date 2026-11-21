@@ -6,6 +6,7 @@ use sorocharge_signer::SorochargeError;
 /// server side. Each variant names one specific, actionable failure — no
 /// bare `String` or `anyhow::Error` at this boundary, and no catch-all.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MppError {
     /// The underlying HTTP request itself failed.
     HttpRequestFailed {
@@ -75,12 +76,31 @@ pub enum MppError {
         reason: String,
     },
     /// The pushed transaction hash has already been consumed (replay).
+    ///
+    /// Returned by `settle_push_mode` in `server.rs` when the caller's replay
+    /// store indicates that the submitted transaction hash was previously consumed.
+    /// Audited for issue #306; no mismatch found.
     HashAlreadyConsumed,
-    /// The credential failed one of the spec's verification checks.
+    /// A verification check failed: structural or signature validation of the
+    /// credential, transfer parameters (recipient, amount, asset), time bounds,
+    /// simulation effects, or server fee ceiling constraints.
+    ///
+    /// Call sites span `client.rs` and `server.rs`. All sites check conformance
+    /// with the MPP specification or simulation outcomes, except for one
+    /// deliberate fold-in: in sponsored pull mode, `server.rs` returns this
+    /// variant if the simulated fee exceeds the server's configured
+    /// `max_transaction_fee_stroops` ceiling, as no separate error variant exists.
+    /// Audited for issue #307.
     VerificationFailed {
         reason: String,
     },
     /// Verification succeeded but on-chain settlement failed.
+    ///
+    /// Returned by `settle_pull_mode` in `server.rs` when RPC transaction
+    /// submission or polling fails, or when the final on-chain transaction status
+    /// is not `"SUCCESS"`. All call sites execute strictly after all verification
+    /// checks have passed.
+    /// Audited for issue #308; no mismatch found.
     SettlementFailed {
         reason: String,
     },

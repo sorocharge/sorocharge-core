@@ -129,6 +129,36 @@ impl SignedEntry {
     pub fn from_xdr(entry: SorobanAuthorizationEntry) -> Self {
         Self(entry)
     }
+
+    /// The ledger number this entry's signature expires at, read back off the
+    /// entry itself.
+    ///
+    /// The expiry is what the network checks when it consumes the entry, so a
+    /// payer-side caller — showing "this authorization expires around ledger
+    /// N", or deciding whether an entry is still worth sending — needs to read
+    /// it from the signed entry rather than remember the parameters it was
+    /// built from. Same value as [`crate::UnsignedEntry::signature_expiration_ledger`]
+    /// on the entry that was signed.
+    ///
+    /// # Errors
+    ///
+    /// [`SorochargeError::UnsupportedCredentialType`] if the entry carries
+    /// `SourceAccount` credentials, which authenticate by transaction signature
+    /// and so have no expiration ledger to report. Entries built and signed by
+    /// this crate never do.
+    pub fn signature_expiration_ledger(&self) -> Result<u32, SorochargeError> {
+        entry_expiration_ledger(&self.0)
+    }
+}
+
+/// The expiry ledger of whichever credential variant `entry` carries — one
+/// implementation shared by [`UnsignedEntry`](crate::UnsignedEntry) and
+/// [`SignedEntry`], so the two can never disagree about what an entry's expiry
+/// is.
+pub(crate) fn entry_expiration_ledger(
+    entry: &SorobanAuthorizationEntry,
+) -> Result<u32, SorochargeError> {
+    credential_preimage_fields(&entry.credentials).map(|(_, ledger, _)| ledger)
 }
 
 /// The 32-byte SHA-256 of a network passphrase — Stellar's `network_id`,

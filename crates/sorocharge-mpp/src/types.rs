@@ -295,6 +295,7 @@ pub struct Challenge {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum Payload {
     /// Pull mode (default): a base64-encoded `TransactionEnvelope`.
     Transaction { transaction: String },

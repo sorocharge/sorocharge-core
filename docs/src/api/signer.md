@@ -178,15 +178,25 @@ pub fn verify_transfer_effects(
 ```
 
 Checks a simulation's events show **exactly** the expected SEP-41 transfer — no second
-transfer, no transfer to someone else, no mint/burn/clawback, no balance event from a
-different contract. The transfer shape checked (`[transfer, from, to]` topics, `i128`
-data) is the live Stellar host's actual output, verified against a real testnet
-transaction — not the CAP text, which the host doesn't always match exactly.
+balance movement, no transfer to someone else, no clawback, no balance event from a
+different contract.
+
+A Stellar Asset Contract does not report every transfer as `transfer`: per CAP-67, a
+transfer whose **sender** is the asset's own issuer is emitted as `mint`, and one whose
+**recipient** is the issuer is emitted as `burn`. Both are therefore accepted, but only as
+the expected payment in disguise — a `mint` must name the expected recipient as its `to`
+topic and carry the expected amount, a `burn` must name the expected payer as its `from`
+topic and carry the expected amount. Anything else is still an unexpected balance change.
+
+The shapes checked (`[transfer, from, to]`, `[mint, to]` and `[burn, from]` topics, `i128`
+data) are the live Stellar host's actual output, verified against real testnet
+transactions — not the CAP text, which the host doesn't always match exactly.
 
 ## Errors
 
 `SorochargeError` — every variant is named for one specific, actionable failure; no bare
-`String`, no catch-all:
+`String`, no catch-all. For what each variant usually means in practice and what to check
+first, see [Troubleshooting errors](../guides/troubleshooting.md):
 
 | Variant | Meaning |
 |---|---|

@@ -478,6 +478,59 @@ mod tests {
         assert_eq!(result, Ok(()));
     }
 
+    /// The Delegated counterpart to `accepts_a_valid_entry_signed_by_the_reference_sdk`:
+    /// `delegated_transfer_signed.json` carries a genuine signature on *both*
+    /// delegate nodes, produced by the pinned SDK's `authorizeEntry` with
+    /// `forAddress` targeting each node in turn. This exercises the most
+    /// structurally complex credential kind against real reference output,
+    /// not just an entry this library signed for itself.
+    #[test]
+    fn accepts_a_delegated_entry_signed_by_the_reference_sdk() {
+        let fixture = load_signed_fixture("delegated_transfer_signed");
+        let xdr_entry = SorobanAuthorizationEntry::from_xdr_base64(
+            &fixture.signed_entry_xdr_base64,
+            Limits::none(),
+        )
+        .expect("fixture XDR should decode");
+
+        let SorobanCredentials::AddressWithDelegates(credentials) = &xdr_entry.credentials else {
+            panic!("delegated fixture should carry AddressWithDelegates credentials");
+        };
+        assert_eq!(
+            credentials.delegates.len(),
+            2,
+            "fixture should carry exactly the two delegate signers it was generated with"
+        );
+
+        let payload = signing_payload(
+            &xdr_entry.credentials,
+            &xdr_entry.root_invocation,
+            &fixture.network_passphrase,
+        )
+        .expect("fixture payload should reconstruct");
+        for delegate in credentials.delegates.iter() {
+            assert!(
+                is_valid_ed25519_signature(&delegate.address, &payload, &delegate.signature),
+                "every delegate node in this fixture should carry a genuine reference-SDK signature"
+            );
+        }
+
+        let expected = ChargeParams {
+            asset_contract: fixture.asset_contract.parse().unwrap(),
+            amount: fixture.amount.parse().unwrap(),
+            payer: fixture.payer.parse().unwrap(),
+            recipient: fixture.recipient.parse().unwrap(),
+            valid_until_ledger: fixture.valid_until_ledger,
+        };
+        let result = verify_entry(
+            &SignedEntry(xdr_entry),
+            &expected,
+            fixture.valid_until_ledger - 1,
+            &fixture.network_passphrase,
+        );
+        assert_eq!(result, Ok(()));
+    }
+
     #[test]
     fn rejects_an_expired_entry() {
         let f = load();
@@ -608,6 +661,86 @@ mod tests {
             &f.network_passphrase,
         );
         assert_eq!(result, Err(SorochargeError::RecipientMismatch));
+    }
+
+    /// Locks the documented check order: expiry is checked before the
+    /// asset, amount, recipient, and signature, so an entry that is both
+    /// expired *and* wrong on any of those must report `ExpiredEntry`. A
+    /// refactor that moved the expiry check below the amount comparison
+    /// would start returning `AmountMismatch` here and fail this test.
+    #[test]
+    fn reports_expiry_before_a_wrong_amount() {
+        let f = load();
+        let mut expected = f.expected.clone();
+        expected.amount += 1;
+        let result = verify_entry(
+            &f.signed,
+            &expected,
+            f.valid_until_ledger,
+            &f.network_passphrase,
+        );
+        assert_eq!(
+            result,
+            Err(SorochargeError::ExpiredEntry {
+                valid_until_ledger: f.valid_until_ledger,
+                current_ledger: f.valid_until_ledger,
+            }),
+            "expiry must be reported before the amount mismatch"
+        );
+    }
+
+    /// Locks the asset check ahead of the payer, amount, and recipient
+    /// checks: an entry whose asset, payer, amount, and recipient are all
+    /// wrong must report `AssetMismatch` first. Reordering asset after any
+    /// of those would fail this test.
+    #[test]
+    fn reports_asset_before_payer_amount_and_recipient() {
+        let f = load();
+        let mut expected = f.expected.clone();
+        expected.asset_contract =
+            ScAddress::Contract(stellar_xdr::ContractId(stellar_xdr::Hash([0x99; 32])));
+        expected.payer = ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(
+            [0x11; 32],
+        ))));
+        expected.amount += 1;
+        expected.recipient = ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(
+            Uint256([0x77; 32]),
+        )));
+        let result = verify_entry(
+            &f.signed,
+            &expected,
+            f.valid_until_ledger - 1,
+            &f.network_passphrase,
+        );
+        assert_eq!(
+            result,
+            Err(SorochargeError::AssetMismatch),
+            "the asset check must run before payer, amount, and recipient"
+        );
+    }
+
+    /// Locks the amount check ahead of the recipient and signature checks:
+    /// an entry with a wrong amount *and* a wrong recipient must report
+    /// `AmountMismatch`, not `RecipientMismatch`.
+    #[test]
+    fn reports_amount_before_recipient() {
+        let f = load();
+        let mut expected = f.expected.clone();
+        expected.amount += 1;
+        expected.recipient = ScAddress::Account(AccountId(PublicKey::PublicKeyTypeEd25519(
+            Uint256([0x77; 32]),
+        )));
+        let result = verify_entry(
+            &f.signed,
+            &expected,
+            f.valid_until_ledger - 1,
+            &f.network_passphrase,
+        );
+        assert_eq!(
+            result,
+            Err(SorochargeError::AmountMismatch),
+            "the amount check must run before the recipient check"
+        );
     }
 
     #[test]

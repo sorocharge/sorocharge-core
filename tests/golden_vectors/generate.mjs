@@ -253,3 +253,41 @@ writeFixture(
   { network_passphrase: networkPassphrase },
   "signed_entry_xdr_base64",
 );
+
+// A Delegated entry with a real signature on each of its two delegate nodes.
+// Each delegate is signed separately with `forAddress` targeting its own
+// node, mirroring the per-signer `sign_entry` calls this library requires;
+// the second call must preserve the first delegate's signature while adding
+// its own. The payload is address-bound (CAP-71), so both signatures cover
+// the same top-level authorizing address.
+const delegatedForSigning = buildDelegatedEntry();
+const delegateAKeypair = Keypair.fromRawEd25519Seed(fixedSeed(0x44));
+const delegateBKeypair = Keypair.fromRawEd25519Seed(fixedSeed(0x55));
+const delegatedSignedByA = await authorizeEntry(
+  delegatedForSigning.entry,
+  delegateAKeypair,
+  validUntilLedger,
+  networkPassphrase,
+  delegatedForSigning.delegateA,
+);
+const delegatedSignedByBoth = await authorizeEntry(
+  delegatedSignedByA,
+  delegateBKeypair,
+  validUntilLedger,
+  networkPassphrase,
+  delegatedForSigning.delegateB,
+);
+writeFixture(
+  "delegated_transfer_signed",
+  delegatedSignedByBoth,
+  {
+    description:
+      "delegated_transfer_signed: a Delegated SorobanAuthorizationEntry with a reference-SDK signature on both delegate nodes",
+    delegate_signers: [
+      delegatedForSigning.delegateB,
+      delegatedForSigning.delegateA,
+    ],
+    network_passphrase: networkPassphrase,
+  },
+  "signed_entry_xdr_base64",
+);

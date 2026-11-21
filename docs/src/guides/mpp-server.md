@@ -20,6 +20,14 @@ job. Concretely:
   `already_consumed: bool` you compute from your own store before calling it, and you mark
   the hash consumed yourself after a successful return.
 
+The reference implementation uses in-memory `Mutex<HashMap>`/`Mutex<HashSet>` stores. That
+is flagged in the code as demo-only: they lose all replay-protection state on restart and
+are not shared between instances. Back them with a durable store that supports an atomic
+check-and-mark (e.g. insert-if-absent on a unique key), so two concurrent requests for the
+same hash cannot both observe it as unconsumed. See the comments on `issued` and
+`consumed_hashes` in
+[`examples/resource_server_mpp.rs`](https://github.com/sorocharge/sorocharge-core/blob/main/crates/sorocharge-mpp/examples/resource_server_mpp.rs).
+
 ## Issue a challenge
 
 ```rust

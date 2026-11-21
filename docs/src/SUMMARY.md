@@ -7,6 +7,7 @@
 - [Three crates, one engine](architecture/overview.md)
 - [x402 protocol mechanics](architecture/x402.md)
 - [MPP protocol mechanics](architecture/mpp.md)
+- [Protocol currency and the live event-shape check](architecture/protocol-currency.md)
 
 ## Guides
 
@@ -15,6 +16,7 @@
 - [Paying with MPP](guides/mpp-client.md)
 - [Running an MPP server](guides/mpp-server.md)
 - [Developer setup](guides/developer-setup.md)
+- [Troubleshooting errors](guides/troubleshooting.md)
 
 ## API reference
 

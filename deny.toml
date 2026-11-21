@@ -6,6 +6,13 @@ targets = ["x86_64-unknown-linux-gnu"]
 
 [advisories]
 version = 2
+ignore = [
+  # chrono is unmaintained (RUSTSEC-2026-0543) but is a transitive dependency
+  # of stellar-rpc-client and is used directly by sorocharge-mpp for ledger
+  # timestamps. No safe upgrade exists yet; revisit when stellar-rpc-client
+  # migrates away from chrono.
+  "RUSTSEC-2026-0543",
+]
 
 [licenses]
 version = 2

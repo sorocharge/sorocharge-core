@@ -6,6 +6,7 @@ use core::fmt;
 /// test) can tell exactly which check failed rather than pattern-matching on
 /// a string. No variant collapses distinct failures into a catch-all.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SorochargeError {
     /// A strkey (`G...`, `C...`, `M...`) failed to decode into an `ScAddress`.
     InvalidAddress { strkey: String },
@@ -40,9 +41,6 @@ pub enum SorochargeError {
     PayerMismatch,
     /// The entry's amount does not match `ChargeParams::amount` exactly.
     AmountMismatch,
-    /// The entry's amount is non-positive (zero or negative), which is
-    /// semantically invalid for a SEP-41 transfer.
-    AmountNonPositive,
     /// The entry's recipient does not match `ChargeParams::recipient`.
     RecipientMismatch,
     /// The signature does not verify against the reconstructed preimage.
@@ -50,9 +48,6 @@ pub enum SorochargeError {
     /// A signer's address matches no credential node (top-level address or
     /// delegate) in the entry being signed.
     NoMatchingCredentialNode,
-    /// The network passphrase does not match any known Stellar network
-    /// (currently only `stellar:pubnet` / `stellar:testnet`).
-    UnsupportedNetwork { network: String },
     /// A simulation's events could not be decoded, or a balance event lacks
     /// the topics or data a transfer must carry.
     SimulationEventsMalformed { reason: String },
@@ -64,6 +59,12 @@ pub enum SorochargeError {
     SigningFailed { reason: String },
     /// Constructing or serializing an XDR structure failed.
     XdrEncodingFailed { reason: String },
+    /// The entry's amount is non-positive (zero or negative), which is
+    /// semantically invalid for a SEP-41 transfer.
+    AmountNonPositive,
+    /// The network passphrase does not match any known Stellar network
+    /// (currently only `stellar:pubnet` / `stellar:testnet`).
+    UnsupportedNetwork { network: String },
 }
 
 impl fmt::Display for SorochargeError {

@@ -1,0 +1,13 @@
+{
+  "description": "Diagnostic event from a real Stellar testnet transaction: a Stellar Asset Contract (SOL) transfer whose sender is the asset's own issuer, which the host reports as `mint` rather than `transfer` (CAP-67 issuer semantics). The event is extracted verbatim from tx b3650c95ac974309a5540e94ec22210fb83e7ca3d54cb16c09c24bdb09b3abbc (ledger 5804644); that transaction's other events are non-balance diagnostics, which verify_transfer_effects ignores.",
+  "source": "getTransaction on https://soroban-testnet.stellar.org, diagnosticEventsXdr",
+  "tx_hash": "b3650c95ac974309a5540e94ec22210fb83e7ca3d54cb16c09c24bdb09b3abbc",
+  "ledger": 5804644,
+  "asset_contract": "CBVJ6GYJJ55ALTHN32OJEFGUZWWTMDFGIBCM42SPYQ4GWLKX2XARAP2N",
+  "payer": "GAGVZMODPYFTULIVSY3RGFADIC5LF4LLSN37N4MFWGNZ57TYBXL2LQQX",
+  "recipient": "CDO5TKQUEGINSQMX4NE62AGR2FSANGTOVV5Z77AQHQBFT5VGV4DUTAX3",
+  "amount": "150349478473",
+  "diagnostic_events_xdr_base64": [
+    "AAAAAQAAAAAAAAABap8bCU96Bczt3pySFNTNrTYMpkBEzmpPxDhrLVfVwRAAAAABAAAAAAAAAAMAAAAPAAAABG1pbnQAAAASAAAAAd3ZqhQhkNlBl+NJ7QDR0WQGmm6te5/8EDwCWfamrwdJAAAADgAAADxTT0w6R0FHVlpNT0RQWUZUVUxJVlNZM1JHRkFESUM1TEY0TExTTjM3TjRNRldHTlo1N1RZQlhMMkxRUVgAAAAKAAAAAAAAAAAAAAAjAYb6SQ=="
+  ]
+}

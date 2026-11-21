@@ -10,7 +10,7 @@ keywords = ["mpp", "stellar", "soroban", "payments", "protocol"]
 categories = ["web-programming", "network-programming", "finance", "authentication"]
 
 [dependencies]
-sorocharge-signer = { path = "../sorocharge-signer" }
+sorocharge-signer = { version = "0.2.0", path = "../sorocharge-signer" }
 stellar-xdr = { workspace = true }
 stellar-rpc-client = { workspace = true }
 reqwest = { workspace = true }

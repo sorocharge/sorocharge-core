@@ -1,0 +1,96 @@
+name: live-event-shape
+
+# Monthly re-validation that `verify_transfer_effects` still agrees with the
+# events the live Soroban host emits. The function encodes the host's actual
+# event shape (not the CAP text), and a protocol upgrade can change it
+# without breaking compilation — so a real transfer is submitted to testnet
+# and checked with the same function production callers use. A mismatch
+# fails the job and opens (or updates) an alert issue; it never passes
+# silently.
+#
+# Every `uses:` is pinned to a commit SHA, matching `.github/workflows/ci.yml`.
+
+on:
+  schedule:
+    # Monthly on the 1st at 04:43 UTC — off the top of the hour.
+    - cron: "43 4 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  live-event-shape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Rust 1.98.1
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: 1.98.1
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      - name: Check testnet's protocol version against the pinned stellar-xdr
+        run: |
+          set -euo pipefail
+          pinned=$(sed -n 's/^stellar-xdr = { version = "=\([0-9][0-9]*\)\..*/\1/p' Cargo.toml)
+          if [ -z "$pinned" ]; then
+            echo "::error::could not read the pinned stellar-xdr major version from Cargo.toml"
+            exit 1
+          fi
+          protocol=$(curl --fail --silent --show-error --max-time 30 \
+            -X POST https://soroban-testnet.stellar.org \
+            -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"getNetwork","params":{}}' \
+            | jq -r '.result.protocolVersion')
+          echo "testnet protocol: $protocol, pinned stellar-xdr major: $pinned"
+          if [ "$protocol" -gt "$pinned" ]; then
+            echo "::error::testnet runs protocol $protocol but stellar-xdr is pinned to $pinned"
+            exit 1
+          fi
+
+      - name: Run a real testnet transfer and diff its event shape
+        run: cargo run --locked -p sorocharge-signer --example check_live_event_shape
+
+      - name: Open or update an alert issue on mismatch
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="Live testnet event-shape check is failing"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body=$(cat <<EOF
+          The scheduled live event-shape check failed on the ${GITHUB_REF_NAME} branch.
+
+          Run: ${run_url}
+
+          This means a real testnet SEP-41 transfer no longer matches the event
+          shape \`crates/sorocharge-signer/src/effects.rs\` encodes in
+          \`verify_transfer_effects\` (or the pinned \`stellar-xdr\` is behind the
+          network's protocol version). Treat it as a possible false-acceptance or
+          false-rejection of payments, not as flaky CI: inspect the run's
+          diagnostic output, compare it with the function's documented shape, and
+          fix the check before accepting payments on that protocol version.
+
+          Re-run manually from the Actions tab or with:
+          \`\`\`sh
+          cargo run -p sorocharge-signer --example check_live_event_shape
+          \`\`\`
+          EOF
+          )
+          gh label create ci-alert --color d93f0b --description "Automated CI alert" 2>/dev/null || true
+          existing=$(gh issue list --label ci-alert --state open --json number,title \
+            --jq '.[] | select(.title == "'"$title"'") | .number' | head -n 1)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --label ci-alert --body "$body"
+          fi

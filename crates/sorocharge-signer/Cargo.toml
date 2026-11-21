@@ -19,3 +19,6 @@ serde = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+stellar-rpc-client = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

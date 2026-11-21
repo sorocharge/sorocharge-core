@@ -5,3 +5,9 @@
 /crates/sorocharge-signer/ @ciscokwiz
 /crates/sorocharge-x402/ @ciscokwiz
 /crates/sorocharge-mpp/ @ciscokwiz
+
+# Security-sensitive files: the malware-scan CI job already treats these as
+# protected files requiring human sign-off. CODEOWNERS ensures the right
+# reviewer is auto-requested on any PR that touches them.
+/security/ @ciscokwiz
+/scripts/malware_scan.py @ciscokwiz
