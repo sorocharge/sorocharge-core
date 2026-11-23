@@ -12,6 +12,22 @@ const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
 /// # Errors
 ///
 /// Returns [`SorochargeError::UnsupportedNetwork`] for any other passphrase.
+///
+/// # Examples
+///
+/// ```
+/// use sorocharge_signer::caip2_for_passphrase;
+///
+/// let id = caip2_for_passphrase("Test SDF Network ; September 2015")?;
+/// assert_eq!(id, "stellar:testnet");
+///
+/// let id = caip2_for_passphrase("Public Global Stellar Network ; September 2015")?;
+/// assert_eq!(id, "stellar:pubnet");
+///
+/// let err = caip2_for_passphrase("Unknown Network ; January 2000");
+/// assert!(err.is_err());
+/// # Ok::<(), sorocharge_signer::SorochargeError>(())
+/// ```
 pub fn caip2_for_passphrase(network_passphrase: &str) -> Result<&'static str, SorochargeError> {
     match network_passphrase {
         PUBNET_PASSPHRASE => Ok("stellar:pubnet"),
