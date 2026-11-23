@@ -1,0 +1,54 @@
+# Normalize line endings on check-in. Cross-platform contributors (mixed
+# Rust/JS/Markdown/TOML) land here from Windows, macOS, and Linux; without
+# this, CRLF-tipped files slip into the tree and rustfmt / cargo clippy /
+# npm prettier disagree with CI's Linux checkouts over whitespace alone.
+#
+# `text=auto` tells Git to use LF in the repo and let the client decide the
+# working-tree line endings on checkout. Binary types are listed explicitly
+# so Git never tries to munge them even if a future `*.ext` entry would
+# otherwise match them as text.
+* text=auto eol=lf
+
+# Source and config — always LF, even on Windows checkouts, so a Windows
+# contributor's editor cannot land CRLF into a Rust file that then fails
+# `cargo fmt --check` on CI's Linux runners.
+*.rs            text eol=lf
+*.toml          text eol=lf
+*.lock          text eol=lf
+*.md            text eol=lf
+*.mjs           text eol=lf
+*.js            text eol=lf
+*.ts            text eol=lf
+*.json          text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.sh            text eol=lf
+*.py            text eol=lf
+*.html          text eol=lf
+*.css           text eol=lf
+*.txt           text eol=lf
+.gitattributes  text eol=lf
+.gitignore      text eol=lf
+Dockerfile      text eol=lf
+
+# Shell scripts must stay LF regardless of platform; a .sh with CRLF fails
+# to run on Linux with a cryptic "/bin/sh^M: bad interpreter" error.
+*.sh            text eol=lf
+
+# Binary types — never normalized, never diffed as text.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.pdf           binary
+*.zip           binary
+*.tar           binary
+*.tar.gz        binary
+*.tgz           binary
+*.gz            binary
+*.wasm          binary
+*.so            binary
+*.dylib         binary
+*.dll           binary
+*.exe           binary

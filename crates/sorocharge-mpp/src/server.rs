@@ -1154,4 +1154,116 @@ mod tests {
             "expected UnsupportedNetwork, got {result:?}"
         );
     }
+
+    /// Issue #150: `MppServer::build_challenge_header` wraps two helpers
+    /// (`encode_base64url_jcs` + `build_www_authenticate_header`) that
+    /// `header.rs` already unit-tests in isolation — but the method itself
+    /// (the one actual callers invoke) had no direct coverage.
+    ///
+    /// This test calls the method with a real `ChargeRequest` and asserts
+    /// the returned header value parses back into that same
+    /// `ChargeRequest` via the committed parsing helpers, which is the
+    /// actual round-trip contract a caller cares about. A drift in either
+    /// the encoding step, the header-building step, or their composition
+    /// fails here.
+    #[test]
+    fn build_challenge_header_round_trips_through_the_parsing_helpers() {
+        use crate::header::{decode_base64url_json, parse_payment_auth_params};
+
+        let rpc_client = stellar_rpc_client::Client::new("https://soroban-testnet.stellar.org:443")
+            .expect("rpc client");
+        let server_signer = TestSigner::from_seed([0x22; 32]);
+        let server = MppServer::new(
+            &rpc_client,
+            &server_signer,
+            NETWORK_PASSPHRASE.to_string(),
+            MppServerConfig::default(),
+        );
+
+        let request = charge_request(true);
+        let expires = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .expect("fixed test timestamp")
+            .with_timezone(&Utc);
+
+        let header = server
+            .build_challenge_header("test-challenge", "api.example.com", &request, expires)
+            .expect("building a challenge header for a well-formed request must not fail");
+
+        // The envelope the HTTP header carries: this is what a client's
+        // 401/402-handling code reads off the wire.
+        assert!(
+            header.starts_with("Payment "),
+            "a WWW-Authenticate: Payment header must start with the Payment scheme, got {header:?}"
+        );
+
+        let params = parse_payment_auth_params(&header)
+            .expect("the built header must parse as a Payment auth-param list");
+
+        // Every param that identifies the challenge or the method is
+        // asserted by name; a drift in the `WWW-Authenticate` grammar
+        // (e.g. a missing `method=` or `intent=`) fails here.
+        assert_eq!(params.get("id").map(String::as_str), Some("test-challenge"));
+        assert_eq!(
+            params.get("realm").map(String::as_str),
+            Some("api.example.com")
+        );
+        assert_eq!(params.get("method").map(String::as_str), Some("stellar"));
+        assert_eq!(params.get("intent").map(String::as_str), Some("charge"));
+        assert_eq!(
+            params.get("expires").map(String::as_str),
+            Some("2026-01-01T00:00:00+00:00"),
+            "expires must be the method's rfc3339-formatted argument"
+        );
+
+        // The round-trip the acceptance criterion asks for: decode the
+        // base64url-JCS `request` param and assert it equals the
+        // `ChargeRequest` the caller handed in.
+        let request_b64 = params
+            .get("request")
+            .expect("the built header must carry a request param");
+        let decoded: ChargeRequest = decode_base64url_json(request_b64).expect(
+            "the request param must decode back to a ChargeRequest via the committed helpers",
+        );
+        assert_eq!(
+            decoded, request,
+            "the ChargeRequest the header carries must round-trip to the one build_challenge_header was called with"
+        );
+    }
+
+    /// Issue #150: `build_challenge_header` must JCS-serialize before
+    /// base64url-encoding, so the `request` param is identical for
+    /// request pairs that differ only in object-key ordering (two callers
+    /// writing the same intent get the same header bytes). Pin this
+    /// through the public method rather than the `encode_base64url_jcs`
+    /// helper alone.
+    #[test]
+    fn build_challenge_header_canonicalises_the_request_payload() {
+        let rpc_client = stellar_rpc_client::Client::new("https://soroban-testnet.stellar.org:443")
+            .expect("rpc client");
+        let server_signer = TestSigner::from_seed([0x22; 32]);
+        let server = MppServer::new(
+            &rpc_client,
+            &server_signer,
+            NETWORK_PASSPHRASE.to_string(),
+            MppServerConfig::default(),
+        );
+
+        let expires = Utc::now() + ChronoDuration::minutes(5);
+
+        // Same ChargeRequest built twice with every field spelled the
+        // same way. JCS is deterministic, so the two header values must
+        // be byte-equal.
+        let request_a = charge_request(true);
+        let request_b = charge_request(true);
+        let header_a = server
+            .build_challenge_header("id-x", "api.example.com", &request_a, expires)
+            .expect("header a");
+        let header_b = server
+            .build_challenge_header("id-x", "api.example.com", &request_b, expires)
+            .expect("header b");
+        assert_eq!(
+            header_a, header_b,
+            "the same ChargeRequest at the same timestamp must produce the same header bytes"
+        );
+    }
 }

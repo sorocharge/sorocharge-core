@@ -1042,4 +1042,124 @@ mod tests {
         );
         assert_eq!(tx.operations.len(), 1, "the operation must be preserved");
     }
+
+    /// Issue #149: `Facilitator::supported()` is a pure function — it reads
+    /// the facilitator's own configured network passphrase and signer
+    /// address, and does no RPC. It must return, for a given
+    /// `FacilitatorConfig`:
+    ///
+    ///   * exactly one `SupportedKind` row, with `x402Version = 2`,
+    ///     `scheme = "exact"`, and `network` equal to the CAIP-2 string
+    ///     for the configured passphrase;
+    ///   * a `signers` map with a single `"stellar:*"` key whose only
+    ///     entry is the facilitator's own G-address;
+    ///   * an empty `extensions` list.
+    ///
+    /// Any drift here is a wire-format break, so the assertions pin every
+    /// field by name rather than smoke-testing the length.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn supported_reports_the_configured_scheme_network_and_signer() {
+        let facilitator_signer = TestSigner::from_seed([0x22; 32]);
+        let expected_address = facilitator_signer.address().to_string();
+
+        // Any RPC the facilitator is wired to is irrelevant here — the
+        // `supported()` path reads nothing from it. Point at a known-good
+        // URL so the client builds, and record no expectation on it.
+        let rpc_client = stellar_rpc_client::Client::new("https://soroban-testnet.stellar.org:443")
+            .expect("rpc client");
+        let facilitator = Facilitator::new(
+            &rpc_client,
+            &facilitator_signer,
+            NETWORK.to_string(),
+            FacilitatorConfig::default(),
+        );
+
+        let response = facilitator.supported();
+
+        assert_eq!(
+            response.kinds.len(),
+            1,
+            "supported() must report exactly one kind"
+        );
+        let kind = &response.kinds[0];
+        assert_eq!(kind.x402_version, 2);
+        assert_eq!(kind.scheme, "exact");
+        assert_eq!(
+            kind.network, CAIP2,
+            "the kind's network must come from the configured passphrase"
+        );
+        assert!(
+            response.extensions.is_empty(),
+            "no extensions are advertised"
+        );
+        assert_eq!(
+            response.signers.len(),
+            1,
+            "signers must have exactly one CAIP-2 pattern"
+        );
+        let stellar = response
+            .signers
+            .get("stellar:*")
+            .expect("supported() must advertise under the stellar:* pattern");
+        assert_eq!(
+            stellar,
+            &vec![expected_address.clone()],
+            "the only signer must be the facilitator's own address"
+        );
+    }
+
+    /// Issue #149: a facilitator built on the public network passphrase
+    /// must return `stellar:pubnet` (not `stellar:testnet`) in its
+    /// `supported()` response. This pins the network passphrase →
+    /// CAIP-2 mapping through the public API rather than through the
+    /// unit-tested `caip2_for_passphrase` helper alone.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn supported_reports_the_public_network_for_the_public_passphrase() {
+        const PUBNET: &str = "Public Global Stellar Network ; September 2015";
+        let facilitator_signer = TestSigner::from_seed([0x44; 32]);
+        let rpc_client = stellar_rpc_client::Client::new("https://soroban-testnet.stellar.org:443")
+            .expect("rpc client");
+        let facilitator = Facilitator::new(
+            &rpc_client,
+            &facilitator_signer,
+            PUBNET.to_string(),
+            FacilitatorConfig::default(),
+        );
+
+        let response = facilitator.supported();
+
+        assert_eq!(response.kinds[0].network, "stellar:pubnet");
+    }
+
+    /// Issue #159: `FacilitatorConfig::default()` encodes the spec's own
+    /// documented defaults — the 50,000-stroop fee ceiling and the
+    /// 100-stroop minimum inclusion buffer. The named module constants
+    /// are convenient but a future edit to either one without updating
+    /// the other would go unnoticed: this test asserts the exact
+    /// numeric values the spec cites, not the names that currently
+    /// resolve to them, so a silent drift fails here.
+    #[test]
+    fn facilitator_config_default_matches_the_specs_documented_values() {
+        let config = FacilitatorConfig::default();
+        assert_eq!(
+            config.max_transaction_fee_stroops, 50_000,
+            "the spec documents a 50,000-stroop default fee ceiling"
+        );
+        assert_eq!(
+            config.inclusion_buffer_stroops, 100,
+            "the spec documents a 100-stroop minimum inclusion buffer"
+        );
+    }
+
+    /// Issue #159: the public `MIN_INCLUSION_BUFFER_STROOPS` constant is
+    /// what a caller who builds their own `FacilitatorConfig` compares
+    /// against to stay at or above the spec's floor. A silent change
+    /// to it would quietly lower that floor, so pin its value here too.
+    #[test]
+    fn min_inclusion_buffer_constant_matches_the_specs_documented_floor() {
+        assert_eq!(
+            MIN_INCLUSION_BUFFER_STROOPS, 100,
+            "the spec's minimum inclusion buffer is 100 stroops"
+        );
+    }
 }
