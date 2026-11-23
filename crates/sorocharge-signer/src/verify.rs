@@ -317,8 +317,9 @@ pub fn verify_entry(
 /// # Errors
 ///
 /// Returns [`SorochargeError::InvalidSignature`] if the total valid
-/// signature weight is below the threshold, or if any individual signature
-/// verification fails.
+/// signature weight is below the threshold. Nodes whose key or signature
+/// cannot be verified are silently skipped rather than immediately
+/// rejected — only the aggregate weight decides.
 ///
 /// Returns [`SorochargeError::ExpiredEntry`] or
 /// [`SorochargeError::ExpirationExceedsAllowance`] for an entry that has
@@ -974,6 +975,68 @@ mod tests {
                     signature_expiration_ledger: 1_000,
                     allowed_until_ledger: 900,
                 })
+            );
+        }
+
+        /// A node whose signature bytes fail Ed25519 verification is silently
+        /// skipped — its weight is not added — rather than causing the
+        /// function to return [`SorochargeError::InvalidSignature`]
+        /// immediately. This pins the "skip invalid, aggregate remaining"
+        /// semantics so a future refactor that changes `continue` to an
+        /// early return would be caught here.
+        #[test]
+        fn node_with_invalid_signature_bytes_is_silently_skipped() {
+            let delegates = [delegate(0x01), delegate(0x02)];
+            // Only delegate(0x01) signs; delegate(0x02)'s node stays void.
+            let (signed, params) = build_signed_delegated(&delegates, &[0], 1_000, 1_000, NETWORK);
+
+            // Replace delegate(0x02)'s void signature with a structurally-
+            // valid scval whose 64-byte signature field is garbage — the
+            // public key is a valid curve point (from the already-signed
+            // node) so VerifyingKey::from_bytes succeeds, but verify() will
+            // reject the random signature bytes.
+            let SorobanCredentials::AddressWithDelegates(mut creds) =
+                signed.as_xdr().credentials.clone()
+            else {
+                panic!("expected AddressWithDelegates credentials");
+            };
+
+            let signed_node_scval = creds
+                .delegates
+                .iter()
+                .find(|d| d.signature != ScVal::Void)
+                .map(|d| d.signature.clone())
+                .expect("one node should have been signed");
+            let (good_public_key, _) = extract_account_signature(&signed_node_scval)
+                .expect("signed node should carry an extractable key");
+
+            let mut delegate_vec: Vec<_> = creds.delegates.iter().cloned().collect();
+            for node in &mut delegate_vec {
+                if node.signature == ScVal::Void {
+                    // Valid key so from_bytes succeeds, but [0xAA; 64] is not
+                    // a valid ed25519 signature over any payload.
+                    node.signature =
+                        build_account_signature_scval(good_public_key, [0xAAu8; 64]).unwrap();
+                    break;
+                }
+            }
+            creds.delegates = delegate_vec.try_into().unwrap();
+            let tampered = SignedEntry::from_xdr(SorobanAuthorizationEntry {
+                credentials: SorobanCredentials::AddressWithDelegates(creds),
+                root_invocation: signed.as_xdr().root_invocation.clone(),
+            });
+
+            let weights: Vec<(Address, u32)> =
+                delegates.iter().map(|(_, a)| (a.clone(), 1)).collect();
+
+            // threshold=1; delegate(0x01) signed correctly so total weight = 1 ≥ threshold.
+            // The tampered node must be silently skipped, not cause an error.
+            let result = verify_delegated_threshold(&tampered, &params, 500, NETWORK, &weights, 1);
+            assert_eq!(
+                result,
+                Ok(()),
+                "a node with an invalid ed25519 signature must be silently skipped, \
+                 not cause an immediate InvalidSignature return"
             );
         }
 
