@@ -868,9 +868,10 @@ mod tests {
             .settle_credential(&credential, &expected, Utc::now(), false)
             .await;
 
-        assert!(
-            matches!(result, Err(MppError::PushModeForbidsFeePayer)),
-            "expected PushModeForbidsFeePayer, got {result:?}"
+        assert_eq!(
+            result,
+            Err(MppError::PushModeForbidsFeePayer),
+            "a hash-type credential against a feePayer:true challenge must be rejected"
         );
     }
 
