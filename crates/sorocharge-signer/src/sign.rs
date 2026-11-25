@@ -16,6 +16,25 @@ use crate::error::SorochargeError;
 /// Implementations wrap a signing key already in memory (or a remote
 /// signing callback); this library does not manage keys.
 ///
+/// # Timing side-channels
+///
+/// Implementations **must** compute the signature in constant time with
+/// respect to the secret key: no secret-dependent branches, table lookups,
+/// or variable-latency scalar multiplication. `preimage` itself is public —
+/// it is a hash of the authorization entry, which the payer and payee both
+/// see — but the ed25519 scalar multiplication inside the signer is not,
+/// and a key-dependent timing signal there can leak the key across many
+/// signatures. This is the same requirement `ed25519-dalek`'s own
+/// `SigningKey::sign` is written to satisfy, so a signer that simply
+/// delegates to it inherits the guarantee. This library cannot enforce the
+/// property for a custom `Signer` — an HSM-backed or remotely-hosted
+/// signer is only as constant-time as the implementation behind it — and
+/// deliberately does not try to paper over that with artificial delays.
+/// Constant-time behaviour is the implementing application's
+/// responsibility, and should be documented (or verified) for any signer
+/// that does not delegate to a vetted constant-time Ed25519
+/// implementation.
+///
 /// # Examples
 ///
 /// A signer can wrap an in-memory Ed25519 key. This deterministic key is for

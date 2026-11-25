@@ -8,6 +8,7 @@
 - [x402 protocol mechanics](architecture/x402.md)
 - [MPP protocol mechanics](architecture/mpp.md)
 - [Protocol currency and the live event-shape check](architecture/protocol-currency.md)
+- [Versioning and compatibility](versioning.md)
 
 ## Guides
 

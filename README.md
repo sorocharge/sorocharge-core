@@ -56,6 +56,34 @@ they already control), a general-purpose Soroban contract client, and a
 CLI (the `examples/` binaries are dev-dependency-gated demos, not a shipped
 product).
 
+## Supported network and protocol versions
+
+This workspace assumes **Soroban protocol 28 or newer** — the first protocol
+in which CAP-71's `AddressV2` credentials are mandatory. `stellar-xdr` is
+pinned to `30.0.0` and the live behaviour it encodes was verified against
+testnet protocol 30; see
+[docs/src/architecture/protocol-currency.md](docs/src/architecture/protocol-currency.md)
+for the check and its last recorded result.
+
+Against an **older network** (protocol 27 or earlier):
+
+- Legacy `CredentialKind::Legacy` entries may still work, because that
+  credential shape predates CAP-71 — but they are not tested against old
+  protocols here and are not supported.
+- `CredentialKind::AddressV2` and `CredentialKind::Delegated` entries will
+  be rejected by the Soroban host at simulation or submission, because the
+  network does not know those credential variants. `sorocharge-signer`
+  cannot catch this earlier: building, signing, and verifying are offline
+  operations over XDR, so an entry can be constructed and locally verified
+  successfully even though an old network will refuse it.
+
+There is no runtime feature detection for this: choose the credential kind
+that matches the network you are submitting to. The x402 client defaults to
+legacy credentials and the MPP adapters use them exclusively, so both
+adapters remain usable against a network older than protocol 28; only an
+application that explicitly asks `sorocharge-signer` for `AddressV2` or
+`Delegated` takes on protocol 28 as a minimum.
+
 ## Install
 
 Not yet published to crates.io — depend on the tagged commit directly:

@@ -572,6 +572,40 @@ mod tests {
         );
     }
 
+    /// `current_ledger` is a `u32`, and `0` is its smallest representable
+    /// value. A ledger of 0 precedes every real expiry ledger, so the entry
+    /// is still live and verification must reach the signature check rather
+    /// than treating the boundary itself as suspicious. This also pins that
+    /// the expiry comparison does not compute a "previous ledger" that would
+    /// underflow at 0.
+    #[test]
+    fn accepts_an_entry_at_the_lowest_possible_current_ledger() {
+        let f = load("legacy_transfer_signed");
+        assert!(
+            f.valid_until_ledger > 0,
+            "fixture must expire after ledger 0 for this boundary to be meaningful"
+        );
+        let result = verify_entry(&f.signed, &f.expected, 0, &f.network_passphrase);
+        assert_eq!(result, Ok(()));
+    }
+
+    /// `u32::MAX` is past every representable expiration ledger, so the entry
+    /// is expired. Reporting [`SorochargeError::ExpiredEntry`] here also pins
+    /// that the check does not add to `current_ledger` (which would overflow
+    /// and panic in debug builds) before comparing it.
+    #[test]
+    fn rejects_an_entry_at_the_highest_possible_current_ledger() {
+        let f = load("legacy_transfer_signed");
+        let result = verify_entry(&f.signed, &f.expected, u32::MAX, &f.network_passphrase);
+        assert_eq!(
+            result,
+            Err(SorochargeError::ExpiredEntry {
+                valid_until_ledger: f.valid_until_ledger,
+                current_ledger: u32::MAX,
+            })
+        );
+    }
+
     #[test]
     fn rejects_an_entry_valid_longer_than_the_caller_allows() {
         let f = load("legacy_transfer_signed");
