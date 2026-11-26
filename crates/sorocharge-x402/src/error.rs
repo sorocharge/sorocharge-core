@@ -71,16 +71,47 @@ pub enum X402Error {
     XdrEncodingFailed { reason: String },
     /// The `PAYMENT-SIGNATURE` (or `/verify` / `/settle` request) payload's
     /// JSON did not deserialize into the expected shape.
+    ///
+    /// Audited return sites. No site in this crate deserializes JSON into
+    /// this variant (request bodies arrive already typed), so every site is
+    /// a fold-in, documented here as deliberate:
+    /// - The facilitator's request validation in `facilitator.rs`, shared by
+    ///   `verify` and `settle`: an `x402Version` other than `2`; a scheme
+    ///   other than `exact`; `payload.accepted.network` differing from
+    ///   `paymentRequirements.network`; an unparseable `asset`, `amount` or
+    ///   `payTo`; a transfer that does not match `paymentRequirements`; a
+    ///   `verify_entry` failure on the auth entry; a simulation error; and
+    ///   simulated transfer events that do not match. Each means the payer's
+    ///   payload is unusable against these requirements, the caller's action
+    ///   is the same (reject it), and `reason` names the failed check.
+    /// - `encode_header_json` in `client.rs`, when serializing the client's
+    ///   own `PaymentPayload` to JSON fails. It is the same payload on the
+    ///   encode side; in practice `serde_json` cannot fail on these types.
     InvalidPaymentPayload { reason: String },
     /// The submitted transaction's XDR failed to decode.
+    ///
+    /// Audited return sites, both in `facilitator.rs`: decoding the payer's
+    /// base64 `TransactionEnvelope` from the payment payload, which matches
+    /// this description; and, in `settle`, decoding the
+    /// `SorobanTransactionData` returned by RPC simulation. The latter is a
+    /// deliberate fold-in: the XDR comes from the RPC node rather than the
+    /// payer, but it is the same decode failure and blocks settlement the
+    /// same way.
     XdrDecodingFailed { reason: String },
     /// The transaction does not authorize a single, bare SEP-41
     /// `transfer(from, to, amount)` call — wrong operation count, wrong
     /// function, wrong argument count/types, or a smuggled sub-invocation.
+    ///
+    /// Returned by `parse_payment_transaction` in `tx.rs`. All call sites
+    /// strictly enforce this exact shape constraint. Audited; no mismatch found.
     UnexpectedTransactionShape { reason: String },
     /// An authorization entry used a credential type the `exact` scheme on
     /// Stellar forbids (`sorobanCredentialsSourceAccount` or
     /// `sorobanCredentialsAddressWithDelegates`).
+    ///
+    /// Returned by `parse_payment_transaction` in `tx.rs` when an authorization
+    /// entry carries either `sorobanCredentialsSourceAccount` or
+    /// `sorobanCredentialsAddressWithDelegates`. Audited; matches condition exactly.
     ForbiddenCredentialType,
     /// The facilitator's own address appeared where the spec's safety
     /// checks forbid it (transaction source, operation source, `from`
