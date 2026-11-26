@@ -25,6 +25,14 @@ pub enum MppError {
         reason: String,
     },
     /// The challenge named a payment method other than `"stellar"`.
+    ///
+    /// Audited return sites, carrying the offending method as `method`:
+    /// - `get_with_payment` in `client.rs`, when the `402` challenge's
+    ///   `method` auth-param is not `"stellar"`.
+    /// - `settle_credential` in `server.rs`, when the credential's echoed
+    ///   `challenge.method` is not `"stellar"`.
+    ///
+    /// Both match the documented meaning; no mismatch found.
     UnsupportedMethod {
         method: String,
     },
@@ -64,6 +72,13 @@ pub enum MppError {
     },
     /// The transaction does not authorize a single, bare SEP-41
     /// `transfer(from, to, amount)` call.
+    ///
+    /// Audited every `MppError::UnexpectedTransactionShape` return site across
+    /// `sorocharge-mpp`; a crate-wide search found no sites outside
+    /// `tx.rs::parse_payment_transaction`. Operation count or type, transfer
+    /// function or argument shape, authorization-entry count or
+    /// sub-invocations, and a mismatch between the transaction operation and
+    /// authorization invocation all violate this condition. No mismatch found.
     UnexpectedTransactionShape {
         reason: String,
     },
@@ -100,6 +115,11 @@ pub enum MppError {
     /// [`VerificationFailed`](Self::VerificationFailed), not this variant.
     ServerAddressConflict,
     /// A call to Stellar RPC failed.
+    ///
+    /// Audited the return sites in `client.rs` and `server.rs`: each wraps a
+    /// failed Stellar RPC call during payment preparation or settlement. No
+    /// validation or other non-RPC failure is folded into this variant.
+    /// No mismatch found.
     RpcFailed {
         reason: String,
     },
