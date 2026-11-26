@@ -31,6 +31,10 @@ pub enum MppError {
     /// The challenge named an intent other than `"charge"` (MPP
     /// session/channel mode, which uses a different signing primitive
     /// entirely, is explicitly out of scope for this crate).
+    ///
+    /// Call sites span `client.rs` and `server.rs`. All sites check conformance
+    /// with the MPP specification for the supported intent.
+    /// Audited for issue tracker; no mismatch found.
     UnsupportedIntent {
         intent: String,
     },
