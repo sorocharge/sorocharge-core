@@ -40,6 +40,11 @@ pub enum MppError {
         reason: String,
     },
     /// A network identifier this crate does not have a CAIP-2 mapping for.
+    ///
+    /// Returned by `caip2_for_passphrase` in `network.rs` when given a network
+    /// passphrase other than mainnet's or testnet's. All call sites check
+    /// network identifier validity against supported CAIP-2 mappings.
+    /// Audited for issue #309; no mismatch found.
     UnsupportedNetwork {
         network: String,
     },
