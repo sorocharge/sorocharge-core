@@ -36,6 +36,10 @@ pub enum MppError {
     },
     /// The challenge's `request` field did not base64url-decode to valid
     /// charge-request JSON.
+    ///
+    /// Returned by `encode_base64url_jcs` in `header.rs` (when JCS serialization
+    /// fails) and by client challenge-parsing logic when the `request` parameter
+    /// fails to decode or deserialize. Audited for issue #294; no mismatch found.
     InvalidChargeRequest {
         reason: String,
     },
