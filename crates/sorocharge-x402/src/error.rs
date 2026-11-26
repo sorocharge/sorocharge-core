@@ -61,13 +61,53 @@ pub enum X402Error {
     /// None of the server's `accepts[]` entries name the `exact` scheme on
     /// a Stellar network this client supports (`stellar:pubnet` /
     /// `stellar:testnet`, matched against the network passphrase given).
+    ///
+    /// Audited: the only return site is `X402Client`'s requirement selection
+    /// in `client.rs`, when no `accepts[]` entry has `scheme == "exact"` and
+    /// a `network` equal to the CAIP-2 identifier of the given passphrase.
+    /// That matches this description exactly; no mismatch found.
     NoAcceptablePaymentRequirements,
     /// A network identifier this crate does not have a CAIP-2 mapping for.
+    ///
+    /// Audited return sites:
+    /// - `network::caip2_for_passphrase` (reached from `client.rs` and
+    ///   `facilitator.rs`), when the passphrase is neither mainnet's nor
+    ///   testnet's; `network` is that passphrase. Matches this description.
+    /// - The facilitator's request validation in `facilitator.rs`, when
+    ///   `paymentRequirements.network` is not the CAIP-2 identifier of the
+    ///   facilitator's own configured network; `network` is the requested
+    ///   identifier. This is a deliberate fold-in: a well-formed identifier
+    ///   such as `stellar:testnet` sent to a mainnet facilitator is reported
+    ///   here too, because in both cases this facilitator cannot settle on
+    ///   the requested network and the caller's correct action is the same.
     UnsupportedNetwork { network: String },
     /// `sorocharge-signer` failed to build or sign the charge entry.
+    ///
+    /// Audited return sites:
+    /// - `?` on `build_charge_entry` / `sign_entry` in `client.rs`, via the
+    ///   `From<SorochargeError>` impl below. Matches this description.
+    /// - `?` on `Signer::sign_preimage` in `tx::sign_transaction`, used by
+    ///   the facilitator to sign the settlement transaction rather than a
+    ///   charge entry. A deliberate fold-in: it is the same signer interface
+    ///   failing, so it is reported the same way.
+    /// - `network::caip2_for_passphrase`, for any `SorochargeError` from
+    ///   `sorocharge_signer::caip2_for_passphrase` other than
+    ///   `UnsupportedNetwork` (which maps to [`X402Error::UnsupportedNetwork`]).
+    ///   That function returns no other variant today, so this arm is
+    ///   unreachable in practice and only keeps the mapping total.
     Signing(SorochargeError),
     /// Building the wrapping `TransactionEnvelope` failed (a value did not
     /// fit its XDR-constrained shape).
+    ///
+    /// Audited return sites: every bounded-XDR conversion in `tx.rs` (the
+    /// `transfer` symbol, transfer args, auth entries, operations, signature
+    /// bytes and the signatures vector), the transaction hash in
+    /// `tx::sign_transaction`, and the base64 XDR encoding of the payment
+    /// envelope in `client.rs` — all match this description. One deliberate
+    /// fold-in: `tx::sign_transaction` also returns this variant when the
+    /// facilitator's signer address is not an Ed25519 account, because the
+    /// envelope's `DecoratedSignature` hint cannot be built from any other
+    /// address shape.
     XdrEncodingFailed { reason: String },
     /// The `PAYMENT-SIGNATURE` (or `/verify` / `/settle` request) payload's
     /// JSON did not deserialize into the expected shape.
