@@ -9,18 +9,54 @@ use sorocharge_signer::SorochargeError;
 #[non_exhaustive]
 pub enum MppError {
     /// The underlying HTTP request itself failed.
+    ///
+    /// Audited return sites, all in `client.rs`: `retry_get`, when every
+    /// attempt of the initial `GET` fails at the transport level (`reason`
+    /// names the last attempt), and the paid retry in `get_with_payment`,
+    /// when that request fails to send. Both match this description. One
+    /// deliberate fold-in: `MppClient::new` also returns this variant when
+    /// the `reqwest` client fails to build, because no request can be made
+    /// without it and the caller's remedy (check the HTTP/TLS environment)
+    /// is the same.
     HttpRequestFailed {
         reason: String,
     },
     /// The resource responded with neither `402` nor `200`.
+    ///
+    /// Audited return sites, all in `get_with_payment` in `client.rs`:
+    /// - The initial request, when its status is neither `200` nor `402`
+    ///   (5xx after retries, or any other status). Matches this description.
+    /// - The paid retry, when its status is anything other than `200`. This
+    ///   is a deliberate fold-in: a second `402` there means the server
+    ///   rejected the credential, and it is reported with that status
+    ///   rather than restarting the payment flow, so the client never pays
+    ///   twice for one request.
     UnexpectedStatus {
         status: u16,
     },
     /// A `402` response carried no `WWW-Authenticate: Payment` challenge.
+    ///
+    /// Audited: the only return site is `get_with_payment` in `client.rs`,
+    /// when a `402` response has no `WWW-Authenticate` header at all. That
+    /// matches this description. A `WWW-Authenticate` header that is present
+    /// but does not use the `Payment` scheme is reported as
+    /// [`MppError::InvalidChallenge`] by the header parser, not here.
     MissingChallenge,
     /// The `WWW-Authenticate` header's `Payment` auth-params did not parse,
     /// or omitted a required parameter (`id`, `realm`, `method`, `intent`,
     /// `request`).
+    ///
+    /// Audited return sites:
+    /// - `header::parse_payment_auth_params`: the header does not start with
+    ///   the `Payment` scheme, or an auth-param has no `=`. Matches.
+    /// - `get_with_payment` in `client.rs`: the header value is not valid
+    ///   visible ASCII, or `id` (missing or empty), `realm`, `method`,
+    ///   `intent` or `request` is missing. Matches.
+    /// - `settle_credential` in `server.rs`: the credential's echoed
+    ///   challenge `request` does not decode, or does not equal the
+    ///   challenge the server issued. A deliberate fold-in: the echoed
+    ///   challenge is the same challenge, coming back from the client, and
+    ///   an unusable or altered copy is rejected the same way.
     InvalidChallenge {
         reason: String,
     },
