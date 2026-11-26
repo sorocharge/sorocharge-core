@@ -81,6 +81,68 @@ messages in the x402 or MPP flow.
 - Man-in-the-middle attacks on the HTTP transport. TLS is assumed.
 - Rate limiting or DoS protection. These are deployment-level concerns.
 
+### 4. Malicious Contributor / Supply-Chain Compromise
+
+An attacker who can open a pull request (or land a commit) against this repository, or who
+compromises a contributor's account or toolchain, rather than attacking the cryptography
+directly. This is a real, observed threat class here: the PolinRider campaign targeted a
+sibling Stellar Drips Wave repository by appending obfuscated payloads to otherwise-readable
+files and exfiltrating through non-Stellar blockchain RPC endpoints. The goal is usually not
+to break `verify_entry`; it is to get code merged that steals keys or funds from whoever
+embeds this library next.
+
+**Defended against:**
+- **Known IOCs**: `scripts/malware_scan.py` scans every git-tracked file against
+  `security/malware_iocs.json` — campaign-specific literal strings, exfiltration domains,
+  malicious npm package names and Packagist namespaces, and suspicious filenames. The
+  `malware-scan` job in `.github/workflows/ci.yml` runs it on every push and pull request,
+  and it is a **required check under branch protection**, so a finding blocks merge rather
+  than merely annotating the PR.
+- **Generic obfuscation heuristics**: independent of any known campaign, the same scan flags
+  dynamic-code-execution and process-spawning primitives — `eval` and `new Function`, Node's
+  child-process module, Python's subprocess module, `os.system`, `Command::new`,
+  `shell_exec`, and similar — long base64/hex-shaped blobs, unusually long high-entropy
+  lines appended to readable files, and file types that have no legitimate reason to be
+  tracked. A new use of an execution primitive must be added to
+  `security/scan_allowlist.json` with a written justification, which is itself a
+  security-relevant review.
+- **Protected files cannot clear themselves**: `scripts/malware_scan.py`,
+  `security/malware_iocs.json` and `security/scan_allowlist.json` are exempt from their own
+  pattern checks (they necessarily contain the strings they search for), but any PR that
+  touches them hard-fails the scan and requires a maintainer's manual review. `CODEOWNERS`
+  requests that review automatically.
+- **Signature-based second layer**: the same job runs ClamAV over the checkout as a
+  straightforward malware-signature check, independent of the project-specific IOCs.
+- **Pinned build inputs**: GitHub Actions are pinned to commit SHAs (`ci.yml` header),
+  crate versions are exact, and `cargo-deny` checks advisories and licenses, so a repointed
+  tag or a yanked/broken dependency cannot silently change what CI executes.
+
+**What the scan does not catch:**
+- **Only the tracked tree at rest.** It reads tracked file contents; it does not execute
+  code, observe build scripts or proc-macro behavior, inspect `target/`, `node_modules/` or
+  `vendor/`, or watch anything a dependency does at runtime. `cargo build` runs arbitrary
+  `build.rs` code that no pattern scan can judge.
+- **Only known shapes.** It is pattern- and IOC-based. A new campaign with no entry in
+  `security/malware_iocs.json`, a differently obfuscated payload, or malicious code written
+  in plain idiomatic Rust/PHP using ordinary APIs (read a file, POST it to an unlisted host)
+  will pass cleanly.
+- **Only text extensions, for the content checks.** Non-text files are covered only by the
+  ClamAV signature scan, and a failed/stale ClamAV signature update is a warning, not a
+  blocking failure.
+- **The protected-files guard depends on `origin/main` being fetchable.** That diff check is
+  skipped when the fetch does not succeed; the content checks still run, but a clean result
+  then does not prove a protected file was untouched.
+- **Intent and dependency additions.** A pull request adding a plausible-looking new crate
+  or package is only checked against known-malicious names; deciding whether the dependency
+  is trustworthy remains a human review responsibility.
+
+**Out of scope:**
+- Compromise of the maintainers' own GitHub accounts, signing keys, or runners. Branch
+  protection and the scan reduce the chance of bad code landing; they do not make a
+  compromised maintainer review meaningful.
+- Reproducible builds or binary attestation. This repository ships source crates, not
+  prebuilt binaries.
+
 ## Summary of Current Known Gaps
 
 | Area | Status |
@@ -90,6 +152,7 @@ messages in the x402 or MPP flow.
 | Key custody / HSM integration | **Out of scope**: Callers provide signing keys in memory |
 | On-chain settlement validation | **Out of scope**: Library only builds/verifies auth entries |
 | Transport security (TLS) | **Assumed** — not a library concern |
+| Supply-chain / malicious contribution | **Partially mitigated**: the `malware-scan` CI gate (required via branch protection) catches known IOCs and obfuscation shapes, but not novel campaigns, runtime/build-script behavior, or trustworthy-looking dependency additions |
 
 ## Concrete Worked Example
 
@@ -102,3 +165,7 @@ and security. A written threat model would have accelerated that review.
 
 - `sorocharge-signer/src/verify.rs` — contains the full list of checks performed by `verify_entry`
 - `benches/signer_benchmarks.rs` — benchmarks for the signing/verification hot path
+- `scripts/malware_scan.py` — the supply-chain scan described in section 4
+- `security/malware_iocs.json` — campaign IOCs and generic suspicious patterns the scan reads
+- `security/scan_allowlist.json` — reviewed exceptions for execution primitives
+- `.github/workflows/ci.yml` — the `malware-scan` job that runs the scan and blocks merge
