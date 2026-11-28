@@ -6,7 +6,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use stellar_xdr::{Limits, WriteXdr};
 
-use sorocharge_signer::{build_charge_entry, sign_entry, ChargeParams, CredentialKind, Signer};
+use sorocharge_signer::{
+    build_charge_entry, retry_get, sign_entry, ChargeParams, CredentialKind, Signer,
+};
 
 use crate::error::X402Error;
 use crate::network::caip2_for_passphrase;
@@ -27,11 +29,6 @@ const DEFAULT_ESTIMATED_LEDGER_SECONDS: u64 = 5;
 /// already observed live on testnet). The margin keeps the expiry inside
 /// the bound at the cost of a shorter authorization window.
 ///
-/// Retry configuration: bounded retry with backoff for transient HTTP
-/// failures (5xx and connection errors). Max 3 attempts with exponential
-/// backoff (1s, 2s, 4s), respecting the per-request timeout so the total
-/// wall-clock time is bounded.
-const MAX_RETRY_ATTEMPTS: u32 = 3;
 fn decode_header_json<T: serde::de::DeserializeOwned>(header_value: &str) -> Result<T, String> {
     let bytes = BASE64
         .decode(header_value.trim())
@@ -44,52 +41,6 @@ fn encode_header_json<T: serde::Serialize>(value: &T) -> Result<String, X402Erro
         reason: e.to_string(),
     })?;
     Ok(BASE64.encode(bytes))
-}
-
-/// Retries an HTTP GET request with bounded backoff for transient failures.
-///
-/// - Retries up to `MAX_RETRY_ATTEMPTS` times (default 3).
-/// - On 5xx or connection-level errors, waits with exponential backoff
-///   (1s, 2s, 4s...).
-/// - Each attempt respects the client's `request_timeout`, so total wall-clock
-///   time is bounded by `timeout * attempts` plus backoff.
-/// - On success, returns the successful response immediately.
-/// - On final failure, returns the last error.
-async fn retry_get<T: reqwest::IntoUrl + Clone>(
-    http: &reqwest::Client,
-    url: T,
-) -> Result<reqwest::Response, X402Error> {
-    let mut attempt = 0;
-    let mut last_error = X402Error::HttpRequestFailed {
-        reason: "exhausted retries".to_string(),
-    };
-    while attempt < MAX_RETRY_ATTEMPTS {
-        attempt += 1;
-        match http.get(url.clone()).send().await {
-            Ok(resp) => {
-                // Don't retry on 402 (payment required) or 200 (ok) — those
-                // are deliberate protocol responses, not transient failures.
-                return Ok(resp);
-            }
-            Err(e) => {
-                last_error = X402Error::HttpRequestFailed {
-                    reason: format!("request attempt {} failed: {e}", attempt),
-                };
-                // Retry on connection errors and 5xx server errors.
-                // We can't easily check the status here since the error is from
-                // the reqwest Client::get().send() path, but connection-level
-                // failures and server 5xx are the transient cases we care about.
-                if attempt < MAX_RETRY_ATTEMPTS {
-                    // Exponential backoff: 1s, 2s, 4s, ...
-                    let backoff = std::time::Duration::from_secs(
-                        1u64.saturating_pow(attempt.saturating_sub(1)),
-                    );
-                    tokio::time::sleep(backoff).await;
-                }
-            }
-        }
-    }
-    Err(last_error)
 }
 
 /// The x402 payer client: performs the `GET` → `402` → build/sign → retry
@@ -236,7 +187,10 @@ impl X402Client {
         network_passphrase: &str,
         current_ledger: u32,
     ) -> Result<reqwest::Response, X402Error> {
-        let first = retry_get(&self.http, url).await?;
+        let first = retry_get(&self.http, url, |reason| X402Error::HttpRequestFailed {
+            reason,
+        })
+        .await?;
 
         if first.status() == reqwest::StatusCode::OK {
             return Ok(first);

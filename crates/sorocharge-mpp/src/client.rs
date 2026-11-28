@@ -19,9 +19,6 @@ use crate::types::{Challenge, ChargeRequest, Credential, Payload};
 const DEFAULT_ESTIMATED_LEDGER_SECONDS: u64 = 5;
 const DEFAULT_CHALLENGE_EXPIRY_SECONDS: i64 = 300;
 const SETTLEMENT_FEE_BUFFER_STROOPS: i64 = 100;
-/// Retry configuration for transient HTTP/RPC failures.
-/// Max 3 attempts with exponential backoff (1s, 2s, 4s).
-const MAX_RETRY_ATTEMPTS: u32 = 3;
 
 fn parse_expires(expires: Option<&str>) -> DateTime<Utc> {
     expires
@@ -32,48 +29,15 @@ fn parse_expires(expires: Option<&str>) -> DateTime<Utc> {
 
 /// Retries an HTTP GET request with bounded backoff for transient failures.
 ///
-/// - Retries up to `MAX_RETRY_ATTEMPTS` times (default 3).
-/// - On connection-level errors (transport failures returned by `send()`),
-///   waits with exponential backoff (1s, 2s, 4s...). Protocol-level responses
-///   (200, 402, 5xx, etc.) are returned to the caller immediately without
-///   retrying — those are deliberate server responses, not transient failures.
-/// - Each attempt respects the client's `request_timeout`, so total wall-clock
-///   time is bounded by `timeout * attempts` plus backoff.
-/// - On success, returns the successful response immediately.
-/// - On final failure, returns the last error.
+/// Thin wrapper around [`sorocharge_signer::retry_get`] that translates the
+/// failure reason into [`MppError::HttpRequestFailed`]. The retry/backoff
+/// logic itself lives in `sorocharge-signer` so it cannot drift between the
+/// x402 and MPP clients.
 async fn retry_get<T: reqwest::IntoUrl + Clone>(
     http: &reqwest::Client,
     url: T,
 ) -> Result<reqwest::Response, MppError> {
-    let mut attempt = 0;
-    let mut last_error = MppError::HttpRequestFailed {
-        reason: "exhausted retries".to_string(),
-    };
-    while attempt < MAX_RETRY_ATTEMPTS {
-        attempt += 1;
-        match http.get(url.clone()).send().await {
-            Ok(resp) => {
-                // Don't retry on 200 (ok) or 402 (payment required) — those are
-                // deliberate protocol responses returned to the caller. Retry
-                // only on connection failures (the `Err` arm below).
-                return Ok(resp);
-            }
-            Err(e) => {
-                last_error = MppError::HttpRequestFailed {
-                    reason: format!("request attempt {} failed: {e}", attempt),
-                };
-                // Retry on connection errors.
-                if attempt < MAX_RETRY_ATTEMPTS {
-                    // Exponential backoff: 1s, 2s, 4s, ...
-                    let backoff = std::time::Duration::from_secs(
-                        2u64.saturating_pow(attempt.saturating_sub(1)),
-                    );
-                    tokio::time::sleep(backoff).await;
-                }
-            }
-        }
-    }
-    Err(last_error)
+    sorocharge_signer::retry_get(http, url, |reason| MppError::HttpRequestFailed { reason }).await
 }
 
 /// The MPP payer client. Owns a Stellar RPC client because, unlike x402,

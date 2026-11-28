@@ -1,7 +1,12 @@
 use crate::SorochargeError;
 
+use std::time::Duration;
+
 const PUBNET_PASSPHRASE: &str = "Public Global Stellar Network ; September 2015";
 const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";
+
+/// Maximum number of attempts for [`retry_get`] before giving up.
+const MAX_RETRY_ATTEMPTS: u32 = 3;
 
 /// Maps a Stellar network passphrase to its CAIP-2 identifier.
 ///
@@ -46,6 +51,63 @@ pub fn caip2_for_passphrase(network_passphrase: &str) -> Result<&'static str, So
     }
 }
 
+/// Retries an HTTP GET request with bounded backoff for transient failures.
+///
+/// This is the single home of the retry/backoff logic shared by the
+/// `sorocharge-x402` and `sorocharge-mpp` clients. Each client supplies its
+/// own `map_error` closure so the error type stays crate-specific; the
+/// retry/backoff semantics themselves live here and cannot drift between the
+/// two adapters.
+///
+/// - Retries up to [`MAX_RETRY_ATTEMPTS`] times.
+/// - Only connection-level failures (the `Err` arm of `send()`) are retried.
+///   Protocol-level responses (`200`, `402`, `5xx`, …) are returned to the
+///   caller immediately — they are deliberate server responses, not transient
+///   failures.
+/// - On each retry, waits with exponential backoff (`1s`, `2s`, `4s`, …).
+/// - Every attempt respects the HTTP client's `request_timeout`, so total
+///   wall-clock time is bounded by `timeout * attempts` plus backoff.
+/// - On success, returns the successful response immediately.
+/// - On final failure, returns the last error, produced by `map_error`.
+///
+/// # Parameters
+///
+/// - `http` — the (already timeout-configured) `reqwest::Client`.
+/// - `url` — the URL to GET, cloned per attempt.
+/// - `map_error` — converts a failure reason string into the caller's error
+///   type.
+pub async fn retry_get<F, E>(
+    http: &reqwest::Client,
+    url: impl reqwest::IntoUrl + Clone,
+    map_error: F,
+) -> Result<reqwest::Response, E>
+where
+    F: Fn(String) -> E,
+{
+    let mut attempt = 0u32;
+    let mut last_error = map_error("exhausted retries".to_string());
+    while attempt < MAX_RETRY_ATTEMPTS {
+        attempt += 1;
+        match http.get(url.clone()).send().await {
+            Ok(resp) => {
+                // Protocol-level responses (200, 402, 5xx, …) are deliberate
+                // server answers, not transient failures: return them as-is.
+                return Ok(resp);
+            }
+            Err(e) => {
+                last_error = map_error(format!("request attempt {attempt} failed: {e}"));
+                if attempt < MAX_RETRY_ATTEMPTS {
+                    // Exponential backoff: 1s, 2s, 4s, …
+                    let backoff =
+                        Duration::from_secs(2u64.saturating_pow(attempt.saturating_sub(1)));
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
+    }
+    Err(last_error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,6 +140,44 @@ mod tests {
                     network: bad.to_string(),
                 })
             );
+        }
+    }
+
+    #[cfg(test)]
+    mod retry_get_tests {
+        use super::*;
+
+        /// A connection-refused address: nothing is listening, so every
+        /// attempt fails at the transport level immediately. This exercises
+        /// the retry-exhaustion path without needing an HTTP server.
+        async fn refused_client() -> (reqwest::Client, String) {
+            // Bind then drop so the port is (almost certainly) closed.
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind ephemeral port");
+            let addr = listener.local_addr().expect("read bound address");
+            drop(listener);
+            let url = format!("http://{addr}/");
+            let http = reqwest::Client::builder()
+                .timeout(Duration::from_millis(10))
+                .build()
+                .expect("http client");
+            (http, url)
+        }
+
+        #[tokio::test]
+        async fn connection_refusal_exhausts_all_attempts_and_reports_final_attempt() {
+            let (http, url) = refused_client().await;
+            let result = retry_get(&http, url, |reason| TestError { reason }).await;
+            assert!(
+                matches!(result, Err(TestError { ref reason }) if reason.contains("request attempt 3")),
+                "expected all {MAX_RETRY_ATTEMPTS} attempts to be reported, got {result:?}"
+            );
+        }
+
+        #[derive(Debug, PartialEq, Eq)]
+        struct TestError {
+            reason: String,
         }
     }
 }

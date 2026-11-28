@@ -1,6 +1,7 @@
 # sorocharge-core
 
 [![CI](https://github.com/sorocharge/sorocharge-core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sorocharge/sorocharge-core/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/sorocharge/sorocharge-core/branch/main/graph/badge.svg)](https://codecov.io/gh/sorocharge/sorocharge-core)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 Rust crates for building, signing, and verifying Soroban authorization

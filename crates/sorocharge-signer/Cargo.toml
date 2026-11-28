@@ -16,9 +16,9 @@ ed25519-dalek = { workspace = true }
 getrandom = { workspace = true }
 sha2 = { workspace = true }
 serde = { workspace = true }
+reqwest = { workspace = true, default-features = false, features = ["rustls"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "macros"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }
 stellar-rpc-client = { workspace = true }
-reqwest = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
